@@ -214,7 +214,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "select_option",
     title: "Select Option",
     description:
-      "Select an option in a <select> dropdown by visible label or option value. Only works on <select> elements — for checkboxes or radio buttons use click instead.",
+      "Select an option in a <select> dropdown by visible label or option value. Only works on <select> elements. For checkboxes or radio buttons use click instead.",
     inputSchema: {
       index: z.number().optional().describe("The select element index number"),
       selector: z.string().optional().describe("CSS selector as fallback"),
@@ -377,7 +377,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         ])
         .optional()
         .describe(
-          "Read mode: glance (fastest — viewport snapshot, no JS extraction, ideal for heavy pages), visible_only/results_only/forms_only/summary/text_only for narrow reads, full/debug for the complete page dump",
+          "Read mode: glance (fastest: viewport snapshot, no JS extraction, ideal for heavy pages), visible_only/results_only/forms_only/summary/text_only for narrow reads, full/debug for the complete page dump",
         ),
     },
     tier: 0,
@@ -386,7 +386,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "screenshot",
     title: "Screenshot",
     description:
-      "Take a screenshot of the current page — see exactly what the user sees. Returns the image for visual analysis. Use when you need to verify visual layout, check what's actually rendered on screen, or when text extraction fails on heavy pages.",
+      "Take a screenshot of the current page. Returns the image for visual analysis. Use when you need to verify visual layout, check what's actually rendered on screen, or when text extraction fails on heavy pages.",
     inputSchema: {},
     tier: 1,
   },
@@ -919,7 +919,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         .string()
         .optional()
         .describe(
-          "CSS selector for the table (auto-detected if omitted — uses first table)",
+          "CSS selector for the table (auto-detected if omitted; uses first table)",
         ),
     },
     tier: 1,
