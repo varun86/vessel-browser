@@ -14,7 +14,7 @@ import { openExternalAllowlisted } from "../src/main/security/external-open";
 import { createCodexFunctionCallOutput } from "../src/main/ai/provider-codex";
 import { flushPersist, setSetting } from "../src/main/config/settings";
 import { requiresExplicitMcpApproval } from "../src/main/mcp/server";
-import { isPremium } from "../src/main/premium/manager";
+import { getPortalUrl, isPremium } from "../src/main/premium/manager";
 import { sanitizeTelemetryProperties } from "../src/main/telemetry/posthog";
 import {
   decodeEncryptionKeyFromStorage,
@@ -39,6 +39,22 @@ function setPremiumStatusForTest(
     expiresAt: "",
   };
   setSetting("premium", state);
+}
+
+async function withMockFetch<T>(
+  handler: (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => Response | Promise<Response>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = handler as typeof fetch;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 }
 
 test("trusted IPC guard rejects unregistered renderer senders", () => {
@@ -173,6 +189,70 @@ test("premium gate only grants offline grace to recently validated active states
 
     setPremiumStatusForTest("past_due", new Date(Date.now() - DAY_MS).toISOString());
     assert.equal(isPremium(), false);
+  } finally {
+    setPremiumStatusForTest("free", "");
+    await flushPersist();
+  }
+});
+
+test("premium billing portal uses the stored verification token", async () => {
+  try {
+    setSetting("premium", {
+      status: "active",
+      customerId: "cus_test",
+      verificationToken: "signed-token",
+      email: "premium@example.com",
+      validatedAt: new Date().toISOString(),
+      expiresAt: "",
+    });
+
+    await withMockFetch(
+      async (input, init) => {
+        assert.equal(String(input), "https://vesselpremium.quantaintellect.com/portal");
+        assert.equal(init?.method, "POST");
+        assert.deepEqual(
+          JSON.parse(String(init?.body || "{}")),
+          { identifier: "signed-token" },
+        );
+        return new Response(
+          JSON.stringify({ url: "https://billing.stripe.test/session" }),
+          { status: 200 },
+        );
+      },
+      async () => {
+        assert.deepEqual(
+          await getPortalUrl(),
+          { ok: true, url: "https://billing.stripe.test/session" },
+        );
+      },
+    );
+  } finally {
+    setPremiumStatusForTest("free", "");
+    await flushPersist();
+  }
+});
+
+test("premium billing portal requires a stored verification token", async () => {
+  try {
+    setSetting("premium", {
+      status: "active",
+      customerId: "cus_test",
+      verificationToken: "",
+      email: "premium@example.com",
+      validatedAt: new Date().toISOString(),
+      expiresAt: "",
+    });
+
+    await withMockFetch(
+      async () => {
+        throw new Error("Portal API should not be called without a token");
+      },
+      async () => {
+        const result = await getPortalUrl();
+        assert.equal(result.ok, false);
+        assert.match(result.error || "", /Verify your Premium subscription/);
+      },
+    );
   } finally {
     setPremiumStatusForTest("free", "");
     await flushPersist();
