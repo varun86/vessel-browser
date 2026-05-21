@@ -482,8 +482,8 @@ const api = {
       ipcRenderer.invoke(Channels.HISTORY_EXPORT_JSON),
     importFile: (): Promise<ImportResult | null> =>
       ipcRenderer.invoke(Channels.HISTORY_IMPORT),
-    onUpdate: (cb: (state: HistoryState) => void): (() => void) => {
-      const handler = (_: unknown, state: HistoryState) => cb(state);
+    onUpdate: (cb: (state: HistoryPage) => void): (() => void) => {
+      const handler = (_: unknown, state: HistoryPage) => cb(state);
       ipcRenderer.on(Channels.HISTORY_UPDATE, handler);
       return () =>
         ipcRenderer.removeListener(Channels.HISTORY_UPDATE, handler);
