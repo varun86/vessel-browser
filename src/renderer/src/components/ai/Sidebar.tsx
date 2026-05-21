@@ -40,6 +40,7 @@ const UNSORTED_FOLDER: BookmarkFolder = {
   name: "Unsorted",
   createdAt: "",
 };
+const HISTORY_PAGE_SIZE = 200;
 
 const MarkdownMessage = (props: { content: string }) => {
   const html = createMemo(() => renderMarkdown(props.content));
@@ -166,6 +167,8 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
   const [chatInput, setChatInput] = createSignal("");
   const [highlightCount, setHighlightCount] = createSignal(0);
   const [highlightIndex, setHighlightIndex] = createSignal(-1);
+  const [visibleHistoryCount, setVisibleHistoryCount] =
+    createSignal(HISTORY_PAGE_SIZE);
   const [premiumState, setPremiumState] = createSignal<PremiumState>({
     status: "free",
     customerId: "",
@@ -177,6 +180,9 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
   const trackedPremiumContexts = new Set<string>();
 
   const isPremium = () => isPremiumStatus(premiumState().status);
+  const visibleHistoryEntries = createMemo(() =>
+    history.historyState().entries.slice(0, visibleHistoryCount()),
+  );
 
   const trackPremiumContext = (
     step:
@@ -464,14 +470,21 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
       label: folder.name,
     })),
   );
-  const groupedBookmarks = createMemo(() =>
-    bookmarkFolders().map((folder) => ({
+  const groupedBookmarks = createMemo(() => {
+    const byFolder = new Map<string, Bookmark[]>();
+    for (const bookmark of bookmarksState().bookmarks) {
+      const items = byFolder.get(bookmark.folderId) ?? [];
+      items.push(bookmark);
+      byFolder.set(bookmark.folderId, items);
+    }
+
+    return bookmarkFolders().map((folder) => ({
       ...folder,
-      items: bookmarksState()
-        .bookmarks.filter((bookmark) => bookmark.folderId === folder.id)
+      items: (byFolder.get(folder.id) ?? [])
+        .slice()
         .sort((a, b) => b.savedAt.localeCompare(a.savedAt)),
-    })),
-  );
+    }));
+  });
   const normalizedBookmarkSearch = createMemo(() =>
     normalizeBookmarkSearchText(bookmarkSearchQuery()),
   );
@@ -1965,7 +1978,7 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
                 </div>
               </div>
               <div class="history-list">
-                <For each={history.historyState().entries}>
+                <For each={visibleHistoryEntries()}>
                   {(entry) => (
                     <button
                       class="history-entry"
@@ -1979,6 +1992,22 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
                     </button>
                   )}
                 </For>
+                <Show
+                  when={visibleHistoryEntries().length < history.historyState().entries.length}
+                >
+                  <button
+                    class="history-entry"
+                    onClick={() =>
+                      setVisibleHistoryCount((count) => count + HISTORY_PAGE_SIZE)
+                    }
+                  >
+                    <span class="history-entry-title">Load more history</span>
+                    <span class="history-entry-url">
+                      Showing {visibleHistoryEntries().length} of{" "}
+                      {history.historyState().entries.length}
+                    </span>
+                  </button>
+                </Show>
                 <Show when={history.historyState().entries.length === 0}>
                   <p class="history-empty">No browsing history yet.</p>
                 </Show>

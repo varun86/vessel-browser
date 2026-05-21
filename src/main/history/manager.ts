@@ -1,6 +1,6 @@
 import { app } from "electron";
 import path from "path";
-import type { ClearDataTimeRange, HistoryEntry, HistoryState, ImportResult } from "../../shared/types";
+import type { ClearDataTimeRange, HistoryEntry, HistoryPage, HistoryState, ImportResult } from "../../shared/types";
 import {
   createDebouncedJsonPersistence,
   loadJsonFile,
@@ -53,6 +53,18 @@ function emit(): void {
 export function getState(): HistoryState {
   load();
   return { entries: [...state!.entries] };
+}
+
+export function listEntries(offset = 0, limit = 200): HistoryPage {
+  load();
+  const safeOffset = Math.max(0, Math.floor(offset));
+  const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
+  return {
+    entries: state!.entries.slice(safeOffset, safeOffset + safeLimit),
+    offset: safeOffset,
+    limit: safeLimit,
+    total: state!.entries.length,
+  };
 }
 
 export function subscribe(

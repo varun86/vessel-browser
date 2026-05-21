@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import type { HistoryState, HistoryEntry } from "../../../shared/types";
+import type { HistoryState, HistoryEntry, HistoryPage } from "../../../shared/types";
 import { createLogger } from "../../../shared/logger";
 
 const logger = createLogger("HistoryStore");
@@ -34,6 +34,8 @@ export function useHistory() {
   void init();
   return {
     historyState,
+    list: (offset?: number, limit?: number): Promise<HistoryPage> =>
+      window.vessel.history.list(offset, limit),
     search: (query: string): Promise<HistoryEntry[]> =>
       window.vessel.history.search(query),
     clear: () => window.vessel.history.clear(),

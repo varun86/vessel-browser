@@ -56,6 +56,11 @@ function cloneState(current: BookmarksState): BookmarksState {
   };
 }
 
+function getFolderMap(): Map<string, BookmarkFolder> {
+  load();
+  return new Map(state!.folders.map((folder) => [folder.id, folder]));
+}
+
 function getBookmarksPath(): string {
   return path.join(app.getPath("userData"), "vessel-bookmarks.json");
 }
@@ -359,12 +364,11 @@ export function searchBookmarks(query: string): Array<{
 }> {
   load();
   if (!query.trim()) return [];
+  const foldersById = getFolderMap();
 
   return state!.bookmarks
     .map((bookmark) => {
-      const folder = state!.folders.find(
-        (item) => item.id === bookmark.folderId,
-      );
+      const folder = foldersById.get(bookmark.folderId);
       const { matchedFields, score } = getBookmarkSearchMatch({
         query,
         title: bookmark.title,

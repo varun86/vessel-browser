@@ -14,6 +14,7 @@ import type {
   BookmarksState,
   ClearDataOptions,
   HistoryState,
+  HistoryPage,
   ImportResult,
   PremiumState,
   ProviderConfig,
@@ -470,6 +471,8 @@ const api = {
   history: {
     get: (): Promise<HistoryState> =>
       ipcRenderer.invoke(Channels.HISTORY_GET),
+    list: (offset?: number, limit?: number): Promise<HistoryPage> =>
+      ipcRenderer.invoke(Channels.HISTORY_LIST, offset, limit),
     search: (query: string) =>
       ipcRenderer.invoke(Channels.HISTORY_SEARCH, query),
     clear: () => ipcRenderer.invoke(Channels.HISTORY_CLEAR),
