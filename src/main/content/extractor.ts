@@ -22,6 +22,15 @@ const extractionCache = new Map<
   { capturedAt: number; content: PageContent }
 >();
 
+export function invalidateExtractionCache(webContents: WebContents): void {
+  const prefix = `${webContents.id}:`;
+  for (const key of extractionCache.keys()) {
+    if (key.startsWith(prefix)) {
+      extractionCache.delete(key);
+    }
+  }
+}
+
 const EMPTY_PAGE_CONTENT: PageContent = {
   title: "",
   content: "",

@@ -10,7 +10,7 @@ const MAX_HISTORY_ENTRIES = 5000;
 const SAVE_DEBOUNCE_MS = 250;
 
 let state: HistoryState | null = null;
-const listeners = new Set<(state: HistoryState) => void>();
+const listeners = new Set<(state: HistoryPage) => void>();
 
 function getHistoryPath(): string {
   return path.join(app.getPath("userData"), "vessel-history.json");
@@ -44,7 +44,7 @@ function save(): void {
 
 function emit(): void {
   if (!state) return;
-  const snapshot = { entries: [...state.entries] };
+  const snapshot = listEntries();
   for (const listener of listeners) {
     listener(snapshot);
   }
@@ -68,7 +68,7 @@ export function listEntries(offset = 0, limit = 200): HistoryPage {
 }
 
 export function subscribe(
-  listener: (state: HistoryState) => void,
+  listener: (state: HistoryPage) => void,
 ): () => void {
   listeners.add(listener);
   return () => {

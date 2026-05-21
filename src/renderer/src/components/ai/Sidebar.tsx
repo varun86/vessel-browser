@@ -40,7 +40,6 @@ const UNSORTED_FOLDER: BookmarkFolder = {
   name: "Unsorted",
   createdAt: "",
 };
-const HISTORY_PAGE_SIZE = 200;
 
 const MarkdownMessage = (props: { content: string }) => {
   const html = createMemo(() => renderMarkdown(props.content));
@@ -167,8 +166,6 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
   const [chatInput, setChatInput] = createSignal("");
   const [highlightCount, setHighlightCount] = createSignal(0);
   const [highlightIndex, setHighlightIndex] = createSignal(-1);
-  const [visibleHistoryCount, setVisibleHistoryCount] =
-    createSignal(HISTORY_PAGE_SIZE);
   const [premiumState, setPremiumState] = createSignal<PremiumState>({
     status: "free",
     customerId: "",
@@ -180,9 +177,6 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
   const trackedPremiumContexts = new Set<string>();
 
   const isPremium = () => isPremiumStatus(premiumState().status);
-  const visibleHistoryEntries = createMemo(() =>
-    history.historyState().entries.slice(0, visibleHistoryCount()),
-  );
 
   const trackPremiumContext = (
     step:
@@ -1978,7 +1972,7 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
                 </div>
               </div>
               <div class="history-list">
-                <For each={visibleHistoryEntries()}>
+                <For each={history.historyState().entries}>
                   {(entry) => (
                     <button
                       class="history-entry"
@@ -1992,19 +1986,15 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
                     </button>
                   )}
                 </For>
-                <Show
-                  when={visibleHistoryEntries().length < history.historyState().entries.length}
-                >
+                <Show when={history.hasMore()}>
                   <button
                     class="history-entry"
-                    onClick={() =>
-                      setVisibleHistoryCount((count) => count + HISTORY_PAGE_SIZE)
-                    }
+                    onClick={() => void history.loadMore()}
                   >
                     <span class="history-entry-title">Load more history</span>
                     <span class="history-entry-url">
-                      Showing {visibleHistoryEntries().length} of{" "}
-                      {history.historyState().entries.length}
+                      Showing {history.historyState().entries.length} of{" "}
+                      {history.historyTotal()}
                     </span>
                   </button>
                 </Show>

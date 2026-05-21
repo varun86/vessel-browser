@@ -45,6 +45,8 @@ export interface SaveBookmarkResult {
 }
 
 const SAVE_DEBOUNCE_MS = 250;
+const DEFAULT_BOOKMARK_SEARCH_LIMIT = 50;
+const MAX_BOOKMARK_SEARCH_LIMIT = 200;
 
 let state: BookmarksState | null = null;
 const listeners = new Set<(state: BookmarksState) => void>();
@@ -356,7 +358,7 @@ export function listFolderOverviews(): BookmarkFolderOverview[] {
   ];
 }
 
-export function searchBookmarks(query: string): Array<{
+export function searchBookmarks(query: string, limit = DEFAULT_BOOKMARK_SEARCH_LIMIT): Array<{
   bookmark: Bookmark;
   folder: BookmarkFolder | null;
   matchedFields: BookmarkSearchField[];
@@ -365,6 +367,10 @@ export function searchBookmarks(query: string): Array<{
   load();
   if (!query.trim()) return [];
   const foldersById = getFolderMap();
+  const safeLimit = Math.max(
+    1,
+    Math.min(MAX_BOOKMARK_SEARCH_LIMIT, Math.floor(limit)),
+  );
 
   return state!.bookmarks
     .map((bookmark) => {
@@ -396,7 +402,8 @@ export function searchBookmarks(query: string): Array<{
     .sort(
       (a, b) =>
         b.score - a.score || b.bookmark.savedAt.localeCompare(a.bookmark.savedAt),
-    );
+    )
+    .slice(0, safeLimit);
 }
 
 export function createFolderWithSummary(

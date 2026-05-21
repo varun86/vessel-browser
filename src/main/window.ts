@@ -282,6 +282,8 @@ export function createMainWindow(
   };
 
   tabManager.onPageLoad((url, wc) => {
+    const activeWc = tabManager.getActiveTab()?.view.webContents;
+    if (activeWc?.id !== wc.id) return;
     void capturePageSnapshot(url, wc, sendToRendererViews);
   });
 
