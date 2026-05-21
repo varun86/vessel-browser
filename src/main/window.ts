@@ -1,7 +1,7 @@
 import { BaseWindow, Menu, MenuItem, WebContentsView, app } from "electron";
 import { existsSync } from "fs";
 import path from "path";
-import { TabManager } from "./tabs/tab-manager";
+import { TabManager, type TabStateChangeMeta } from "./tabs/tab-manager";
 import { loadSettings } from "./config/settings";
 import { Channels } from "../shared/channels";
 import type { UIState, TabState } from "../shared/types";
@@ -198,7 +198,11 @@ function getWindowIconPath(): string | undefined {
 }
 
 export function createMainWindow(
-  onTabStateChange: (tabs: TabState[], activeId: string) => void,
+  onTabStateChange: (
+    tabs: TabState[],
+    activeId: string,
+    meta: TabStateChangeMeta,
+  ) => void,
 ): WindowState {
   const mainWindow = new BaseWindow({
     width: 1280,
