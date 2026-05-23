@@ -83,9 +83,12 @@ export interface ActionContext {
 export class TabMutex {
   private queue = Promise.resolve();
   enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      this.queue = this.queue.then(fn).then(resolve, reject);
-    });
+    const run = this.queue.then(fn, fn);
+    this.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 }
 
