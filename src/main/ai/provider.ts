@@ -40,7 +40,7 @@ export interface AIProvider {
   cancel(): void;
 }
 
-export function sanitizeProviderConfig(config: ProviderConfig): ProviderConfig {
+function sanitizeProviderConfig(config: ProviderConfig): ProviderConfig {
   return {
     ...config,
     apiKey: config.apiKey.trim(),
@@ -50,7 +50,7 @@ export function sanitizeProviderConfig(config: ProviderConfig): ProviderConfig {
   };
 }
 
-export function sanitizeReasoningEffortLevel(
+function sanitizeReasoningEffortLevel(
   value: unknown,
 ): ReasoningEffortLevel {
   return value === "low" ||
@@ -62,11 +62,11 @@ export function sanitizeReasoningEffortLevel(
     : "off";
 }
 
-export function validateProviderConfig(config: ProviderConfig): string | null {
+function validateProviderConfig(config: ProviderConfig): string | null {
   return validateProviderConnection(config, { requireModel: true });
 }
 
-export function validateProviderConnection(
+function validateProviderConnection(
   config: ProviderConfig,
   options: { requireModel: boolean } = { requireModel: true },
 ): string | null {
