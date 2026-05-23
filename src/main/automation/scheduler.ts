@@ -105,7 +105,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   return Object.values(value).every((entry) => typeof entry === "string");
 }
 
-export function computeNextRun(schedule: ScheduleConfig, from: Date = new Date()): Date {
+function computeNextRun(schedule: ScheduleConfig, from: Date = new Date()): Date {
   switch (schedule.type) {
     case "once":
       return new Date(schedule.runAt!);
@@ -125,10 +125,12 @@ export function computeNextRun(schedule: ScheduleConfig, from: Date = new Date()
       const next = new Date(from);
       next.setHours(schedule.hour!, schedule.minute!, 0, 0);
       const daysUntil = (schedule.dayOfWeek! - next.getDay() + 7) % 7;
-      if (daysUntil === 0 && next <= from) {
-        next.setDate(next.getDate() + 7);
+      if (daysUntil === 0) {
+        if (next <= from) {
+          next.setDate(next.getDate() + 7);
+        }
       } else {
-        next.setDate(next.getDate() + (daysUntil || 7));
+        next.setDate(next.getDate() + daysUntil);
       }
       return next;
     }
@@ -309,13 +311,13 @@ export function registerScheduleHandlers(
   runtime: AgentRuntime,
   sendToAll: (channel: string, ...args: unknown[]) => void,
 ): void {
+  stopScheduler();
   broadcastFn = sendToAll;
   loadJobs();
   if (normalizeJobs()) {
     saveJobs();
   }
 
-  removeIdleListener?.();
   removeIdleListener = onAIStreamIdle(() => tick(windowState, runtime));
 
   // Align the first tick to the top of the next minute so jobs fire at :00 seconds.
@@ -391,7 +393,7 @@ export function registerScheduleHandlers(
   });
 }
 
-export function stopScheduler(): void {
+function stopScheduler(): void {
   if (removeIdleListener) {
     removeIdleListener();
     removeIdleListener = null;
