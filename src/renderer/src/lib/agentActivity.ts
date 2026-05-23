@@ -5,8 +5,8 @@ import type {
   AgentTranscriptEntry,
 } from "../../../shared/types";
 
-export const AGENT_ACTIVITY_WINDOW_MS = 6000;
-export const AGENT_RECENT_WINDOW_MS = 30_000;
+const AGENT_ACTIVITY_WINDOW_MS = 6000;
+const AGENT_RECENT_WINDOW_MS = 30_000;
 export const AGENT_RUNNING_STALE_WINDOW_MS = 5 * 60_000;
 
 export type AgentPresence = "active" | "recent" | "idle";
@@ -93,7 +93,7 @@ function isAgentActionActive(
   return currentTime - finishedAt < AGENT_ACTIVITY_WINDOW_MS;
 }
 
-export function hasRecentAgentActivity(
+function hasRecentAgentActivity(
   state: AgentRuntimeState,
   currentTime = Date.now(),
 ): boolean {
