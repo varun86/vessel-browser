@@ -7,6 +7,7 @@ import type {
 } from "../src/shared/research-types";
 import { ResearchOrchestrator } from "../src/main/agent/research/orchestrator";
 import type { AIProvider } from "../src/main/ai/provider";
+import { TabMutex } from "../src/main/ai/page-actions";
 import type { AgentRuntime } from "../src/main/agent/runtime";
 import type { TabManager } from "../src/main/tabs/tab-manager";
 
@@ -137,6 +138,24 @@ function makeMockObjectives(): ResearchObjectives {
     totalSourceBudget: 10,
   };
 }
+
+it("keeps the tab mutex usable after a rejected sub-agent action", async () => {
+  const mutex = new TabMutex();
+  const events: string[] = [];
+
+  const first = mutex.enqueue(async () => {
+    events.push("first:start");
+    throw new Error("boom");
+  });
+  const second = mutex.enqueue(async () => {
+    events.push("second:start");
+    return "ok";
+  });
+
+  await assert.rejects(first, /boom/);
+  assert.equal(await second, "ok");
+  assert.deepEqual(events, ["first:start", "second:start"]);
+});
 
 describe("ResearchState transitions", () => {
   it("starts in idle phase", () => {
