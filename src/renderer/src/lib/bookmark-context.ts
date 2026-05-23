@@ -97,7 +97,7 @@ export function collectBookmarkConversationCues(
   return dedupe(cues);
 }
 
-export function mergeBookmarkMemorySummary(
+function mergeBookmarkMemorySummary(
   existingSummary: string | undefined,
   cues: string[],
 ): string | undefined {
@@ -163,7 +163,7 @@ export function getBookmarkMemory(
   return map[bookmarkMemoryKey(url)] ?? null;
 }
 
-export function rememberBookmarkContext(args: {
+function rememberBookmarkContext(args: {
   bookmark: Bookmark;
   messages: AIMessage[];
   storage?: StorageLike | null;
