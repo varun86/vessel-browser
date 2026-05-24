@@ -54,7 +54,7 @@ const EXPLICIT_OPTION_PREFIX = /^\s*(?:[-*+•–—]|\d+[.)]|\(\d+\)|[A-Za-z][.
 const SENTENCE_STARTER = /^(?:Here|These|They|You|I\s|We\s|This|That|If|When|Because|Also|Please|Let|Will|Would|Could|Should|Can|May|Might|Must|Shall)\b/i;
 const MAX_QUICK_REPLY_LABEL_LENGTH = 180;
 
-export function makeQuickReply(label: string): QuickReplyOption | null {
+function makeQuickReply(label: string): QuickReplyOption | null {
   const cleaned = label
     .replace(EXPLICIT_OPTION_PREFIX, "")
     .replace(/[*_`~]/g, "")

@@ -61,3 +61,29 @@ test("normalizeScheduledJob advances recurring jobs instead of replaying missed 
   assert.equal(job.enabled, true);
   assert.equal(job.nextRunAt, "2026-03-28T16:15:00.000Z");
 });
+
+test("normalizeScheduledJob keeps weekly jobs later the same day", () => {
+  const now = new Date("2026-03-27T12:00:00.000Z");
+  const job = buildJob({
+    schedule: { type: "weekly", dayOfWeek: 5, hour: 16, minute: 15 },
+    nextRunAt: "2026-03-20T16:15:00.000Z",
+  });
+
+  const changed = normalizeScheduledJob(job, now);
+
+  assert.equal(changed, true);
+  assert.equal(job.nextRunAt, "2026-03-27T23:15:00.000Z");
+});
+
+test("normalizeScheduledJob advances weekly jobs after today's time has passed", () => {
+  const now = new Date("2026-03-28T01:00:00.000Z");
+  const job = buildJob({
+    schedule: { type: "weekly", dayOfWeek: 5, hour: 16, minute: 15 },
+    nextRunAt: "2026-03-20T16:15:00.000Z",
+  });
+
+  const changed = normalizeScheduledJob(job, now);
+
+  assert.equal(changed, true);
+  assert.equal(job.nextRunAt, "2026-04-03T23:15:00.000Z");
+});

@@ -2,8 +2,6 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { ToolDefinition } from "./definitions";
 
-const MCP_PREFIX = "vessel_";
-
 /**
  * Convert tool definitions to Anthropic.Tool[] for the internal AI agent.
  * Filters out mcpOnly tools.
@@ -36,21 +34,4 @@ export function toAnthropicTools(defs: ToolDefinition[]): Anthropic.Tool[] {
         input_schema: inputSchema,
       };
     });
-}
-
-/**
- * Build a lookup map from base tool name to its definition.
- * Useful for MCP server to reference canonical descriptions/titles.
- */
-export function buildToolDefMap(
-  defs: ToolDefinition[],
-): Record<string, ToolDefinition> {
-  return Object.fromEntries(defs.map((d) => [d.name, d]));
-}
-
-/**
- * Get the MCP tool name with the vessel_ prefix.
- */
-export function mcpName(baseName: string): string {
-  return `${MCP_PREFIX}${baseName}`;
 }
