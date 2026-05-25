@@ -18,6 +18,8 @@ const RESEND_API = "https://api.resend.com/emails";
 const ACTIVATION_CHALLENGE_TTL_MS = 15 * 60 * 1000;
 const PREMIUM_AUTH_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_FEEDBACK_MESSAGE_LENGTH = 5000;
+const FEEDBACK_SPAM_GUARD_WINDOW_SECONDS = 60 * 60;
+const FEEDBACK_SPAM_GUARD_MAX = 5;
 
 // --- Stripe helpers ---
 
@@ -131,6 +133,16 @@ function base64UrlToBytes(value) {
 
 function base64UrlToString(value) {
   return new TextDecoder().decode(base64UrlToBytes(value));
+}
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 async function importHmacKey(secret) {
@@ -275,6 +287,36 @@ async function sendFeedbackEmail(env, email, message, source = "") {
     const body = await response.text();
     throw new Error(body || `Feedback delivery failed with status ${response.status}`);
   }
+}
+
+async function checkFeedbackSpamGuard(request, env) {
+  if (!env.ACTIVATION_KV) return null;
+
+  try {
+    const rawClientId =
+      request.headers.get("cf-connecting-ip") ||
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      "unknown";
+    const key = `feedback-rate:${await sha256Hex(rawClientId)}`;
+    const current = Number(await env.ACTIVATION_KV.get(key));
+    const next = Number.isFinite(current) ? current + 1 : 1;
+
+    if (next > FEEDBACK_SPAM_GUARD_MAX) {
+      return corsResponse(
+        request,
+        env,
+        { error: "Too many feedback messages. Try again later." },
+        429,
+      );
+    }
+
+    await env.ACTIVATION_KV.put(key, String(next), {
+      expirationTtl: FEEDBACK_SPAM_GUARD_WINDOW_SECONDS,
+    });
+  } catch (error) {
+    console.warn("Feedback spam guard failed open:", error);
+  }
+  return null;
 }
 
 async function buildPremiumStatus(env, customerId, fallbackEmail = "", preferredSubscription = null) {
@@ -519,6 +561,9 @@ async function handleFeedback(request, env) {
       503,
     );
   }
+
+  const spamGuardResponse = await checkFeedbackSpamGuard(request, env);
+  if (spamGuardResponse) return spamGuardResponse;
 
   await sendFeedbackEmail(env, email, message, source);
   return corsResponse(request, env, { ok: true });
