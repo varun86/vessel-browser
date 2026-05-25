@@ -14,7 +14,12 @@ import { openExternalAllowlisted } from "../src/main/security/external-open";
 import { createCodexFunctionCallOutput } from "../src/main/ai/provider-codex";
 import { flushPersist, setSetting } from "../src/main/config/settings";
 import { requiresExplicitMcpApproval } from "../src/main/mcp/server";
-import { getPortalUrl, isPremium } from "../src/main/premium/manager";
+import {
+  assertFeatureUnlocked,
+  assertToolUnlocked,
+  getPortalUrl,
+  isPremium,
+} from "../src/main/premium/manager";
 import { sanitizeTelemetryProperties } from "../src/main/telemetry/posthog";
 import {
   decodeEncryptionKeyFromStorage,
@@ -189,6 +194,67 @@ test("premium gate only grants offline grace to recently validated active states
 
     setPremiumStatusForTest("past_due", new Date(Date.now() - DAY_MS).toISOString());
     assert.equal(isPremium(), false);
+  } finally {
+    setPremiumStatusForTest("free", "");
+    await flushPersist();
+  }
+});
+
+test("premium assertions block gated tools and features for free users", async () => {
+  try {
+    setPremiumStatusForTest("free", "");
+
+    for (const toolName of [
+      "screenshot",
+      "save_session",
+      "load_session",
+      "list_sessions",
+      "delete_session",
+      "flow_start",
+      "flow_advance",
+      "flow_status",
+      "flow_end",
+      "metrics",
+      "extract_table",
+      "vault_login",
+      "vault_status",
+      "vault_totp",
+      "human_vault_list",
+      "human_vault_fill",
+      "human_vault_remove",
+    ]) {
+      assert.throws(
+        () => assertToolUnlocked(toolName),
+        /requires Vessel Premium/,
+      );
+    }
+
+    assert.throws(
+      () => assertFeatureUnlocked("vault", "Agent Credential Vault"),
+      /Agent Credential Vault requires Vessel Premium/,
+    );
+    assert.throws(
+      () => assertFeatureUnlocked("human_vault", "Passwords"),
+      /Passwords requires Vessel Premium/,
+    );
+    assert.doesNotThrow(() => assertToolUnlocked("navigate"));
+  } finally {
+    setPremiumStatusForTest("free", "");
+    await flushPersist();
+  }
+});
+
+test("premium assertions allow gated tools and features for active premium users", async () => {
+  try {
+    setPremiumStatusForTest("active", new Date().toISOString());
+
+    assert.doesNotThrow(() => assertToolUnlocked("screenshot"));
+    assert.doesNotThrow(() =>
+      assertFeatureUnlocked("vault", "Agent Credential Vault"),
+    );
+    assert.doesNotThrow(() =>
+      assertFeatureUnlocked("human_vault", "Passwords"),
+    );
   } finally {
     setPremiumStatusForTest("free", "");
     await flushPersist();

@@ -159,6 +159,25 @@ export function isFeatureGated(featureName: string): boolean {
   return PREMIUM_FEATURES.has(featureName) && !isPremium();
 }
 
+export function getPremiumToolGateMessage(toolName: string): string {
+  return `This tool (${toolName}) requires Vessel Premium. Upgrade at Settings > Premium to unlock screenshot, session management, workflow tracking, and more.`;
+}
+
+export function assertToolUnlocked(toolName: string): void {
+  if (isToolGated(toolName)) {
+    throw new Error(getPremiumToolGateMessage(toolName));
+  }
+}
+
+export function assertFeatureUnlocked(
+  featureName: string,
+  featureLabel = featureName,
+): void {
+  if (isFeatureGated(featureName)) {
+    throw new Error(`${featureLabel} requires Vessel Premium.`);
+  }
+}
+
 // --- Stripe Checkout ---
 
 /**
