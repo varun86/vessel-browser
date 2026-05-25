@@ -90,6 +90,7 @@ import { appendAuditEntry } from "../vault/audit";
 import * as humanVault from "../vault/human-vault";
 import { requestHumanVaultConsent } from "../vault/human-consent";
 import { trackVaultAction } from "../telemetry/posthog";
+import { assertToolUnlocked } from "../premium/manager";
 let httpServer: http.Server | null = null;
 let mcpAuthToken: string | null = null;
 const logger = createLogger("MCP");
@@ -215,6 +216,15 @@ function asNoActiveTabResponse() {
   return asErrorTextResponse("No active tab");
 }
 
+function getPremiumToolGateResponse(toolName: string) {
+  try {
+    assertToolUnlocked(toolName);
+    return null;
+  } catch (error) {
+    return asTextResponse(getErrorMessage(error));
+  }
+}
+
 function asPromptResponse(text: string) {
   return {
     messages: [
@@ -336,6 +346,9 @@ async function withAction(
   args: Record<string, unknown>,
   executor: () => Promise<string>,
 ): Promise<{ content: Array<{ type: "text"; text: string }> }> {
+  const premiumGate = getPremiumToolGateResponse(name);
+  if (premiumGate) return premiumGate;
+
   try {
     const result = await runtime.runControlledAction({
       source: "mcp",
@@ -1924,6 +1937,9 @@ function registerTools(
         "Capture a screenshot of the current page. Returns a base64-encoded PNG image.",
     },
     async () => {
+      const premiumGate = getPremiumToolGateResponse("screenshot");
+      if (premiumGate) return premiumGate;
+
       const tab = tabManager.getActiveTab();
       if (!tab) return asNoActiveTabResponse();
 
@@ -3294,6 +3310,9 @@ function registerTools(
       },
     },
     async ({ goal, steps }) => {
+      const premiumGate = getPremiumToolGateResponse("flow_start");
+      if (premiumGate) return premiumGate;
+
       const normalizedSteps = coerceStringArray(steps) ?? [];
       const tab = tabManager.getActiveTab();
       const flow = runtime.startFlow(
@@ -3321,6 +3340,9 @@ function registerTools(
       },
     },
     async ({ detail }) => {
+      const premiumGate = getPremiumToolGateResponse("flow_advance");
+      if (premiumGate) return premiumGate;
+
       const flow = runtime.advanceFlow(detail);
       if (!flow) return asTextResponse("No active flow to advance");
       const ctx = runtime.getFlowContext();
@@ -3335,6 +3357,9 @@ function registerTools(
       description: "Check the current workflow progress.",
     },
     async () => {
+      const premiumGate = getPremiumToolGateResponse("flow_status");
+      if (premiumGate) return premiumGate;
+
       const flow = runtime.getFlowState();
       if (!flow) return asTextResponse("No active workflow.");
       return asTextResponse(runtime.getFlowContext());
@@ -3348,6 +3373,9 @@ function registerTools(
       description: "Clear the active workflow tracker.",
     },
     async () => {
+      const premiumGate = getPremiumToolGateResponse("flow_end");
+      if (premiumGate) return premiumGate;
+
       runtime.clearFlow();
       return asTextResponse("Workflow ended.");
     },
@@ -4151,6 +4179,9 @@ function registerTools(
       },
     },
     async ({ domain }) => {
+      const premiumGate = getPremiumToolGateResponse("vault_status");
+      if (premiumGate) return premiumGate;
+
       let targetDomain = domain;
       if (!targetDomain) {
         const tab = tabManager.getActiveTab();
@@ -4238,6 +4269,9 @@ function registerTools(
       submit_after,
       submit_index,
     }) => {
+      const premiumGate = getPremiumToolGateResponse("vault_login");
+      if (premiumGate) return premiumGate;
+
       const tab = tabManager.getActiveTab();
       if (!tab) return asNoActiveTabResponse();
 
@@ -4370,6 +4404,9 @@ function registerTools(
       },
     },
     async ({ credential_label, code_index, submit_after, submit_index }) => {
+      const premiumGate = getPremiumToolGateResponse("vault_totp");
+      if (premiumGate) return premiumGate;
+
       const tab = tabManager.getActiveTab();
       if (!tab) return asNoActiveTabResponse();
 
@@ -4476,6 +4513,9 @@ function registerTools(
       }),
     },
     async ({ domain }) => {
+      const premiumGate = getPremiumToolGateResponse("human_vault_list");
+      if (premiumGate) return premiumGate;
+
       const consent = await requestHumanVaultConsent({
         action: "list",
         domain: domain ?? "all",
@@ -4554,6 +4594,9 @@ function registerTools(
       }),
     },
     async ({ entry_id, username_index, password_index, submit_after, submit_index }) => {
+      const premiumGate = getPremiumToolGateResponse("human_vault_fill");
+      if (premiumGate) return premiumGate;
+
       const tab = tabManager.getActiveTab();
       if (!tab) return asNoActiveTabResponse();
 
@@ -4665,6 +4708,9 @@ function registerTools(
       }),
     },
     async ({ entry_id }) => {
+      const premiumGate = getPremiumToolGateResponse("human_vault_remove");
+      if (premiumGate) return premiumGate;
+
       const entry = humanVault.getEntry(entry_id);
       if (!entry) {
         return asErrorTextResponse(`No entry found with ID ${entry_id}.`);
@@ -4694,6 +4740,9 @@ function registerTools(
       inputSchema: z.object({}),
     },
     async () => {
+      const premiumGate = getPremiumToolGateResponse("metrics");
+      if (premiumGate) return premiumGate;
+
       const m = runtime.getMetrics();
       const lines = [
         `Session Metrics:`,
