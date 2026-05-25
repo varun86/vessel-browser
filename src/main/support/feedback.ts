@@ -11,6 +11,7 @@ const SUPPORT_API =
   "https://vesselpremium.quantaintellect.com";
 
 const MAX_FEEDBACK_MESSAGE_LENGTH = 5000;
+const FEEDBACK_REQUEST_TIMEOUT_MS = 15_000;
 
 type FeedbackPayload = {
   email: string;
@@ -41,9 +42,11 @@ export async function submitFeedback(
   }
 
   try {
+    const signal = AbortSignal.timeout(FEEDBACK_REQUEST_TIMEOUT_MS);
     const res = await fetch(`${SUPPORT_API}/feedback`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal,
       body: JSON.stringify({
         email,
         message,
