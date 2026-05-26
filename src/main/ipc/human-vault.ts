@@ -3,6 +3,7 @@ import { Channels } from "../../shared/channels";
 import { assertString, assertOptionalString, assertTrustedIpcSender } from "./common";
 import * as vault from "../vault/human-vault";
 import type { HumanCredentialEntry } from "../../shared/types";
+import { assertFeatureUnlocked } from "../premium/manager";
 
 const HUMAN_VAULT_CATEGORIES = new Set([
   "login",
@@ -26,15 +27,21 @@ function normalizeTags(value: unknown): string[] | undefined {
   return tags.length > 0 ? tags : undefined;
 }
 
+function assertHumanVaultUnlocked(): void {
+  assertFeatureUnlocked("human_vault", "Passwords");
+}
+
 export function registerHumanVaultHandlers(): void {
   ipcMain.handle(Channels.HUMAN_VAULT_LIST, (event, domain?: string) => {
     assertTrustedIpcSender(event);
+    assertHumanVaultUnlocked();
     if (domain !== undefined) assertString(domain, "domain");
     return domain ? vault.findForDomain(domain) : vault.listEntries();
   });
 
   ipcMain.handle(Channels.HUMAN_VAULT_GET, (event, id: string) => {
     assertTrustedIpcSender(event);
+    assertHumanVaultUnlocked();
     assertString(id, "id");
     return vault.getEntrySafe(id);
   });
@@ -55,6 +62,7 @@ export function registerHumanVaultHandlers(): void {
       },
     ) => {
       assertTrustedIpcSender(event);
+      assertHumanVaultUnlocked();
       if (!input || typeof input !== "object") {
         throw new Error("Invalid credential entry");
       }
@@ -103,6 +111,7 @@ export function registerHumanVaultHandlers(): void {
       }>,
     ) => {
       assertTrustedIpcSender(event);
+      assertHumanVaultUnlocked();
       assertString(id, "id");
       if (!updates || typeof updates !== "object") {
         throw new Error("Invalid updates");
@@ -147,12 +156,14 @@ export function registerHumanVaultHandlers(): void {
 
   ipcMain.handle(Channels.HUMAN_VAULT_REMOVE, (event, id: string) => {
     assertTrustedIpcSender(event);
+    assertHumanVaultUnlocked();
     assertString(id, "id");
     return vault.removeEntry(id);
   });
 
   ipcMain.handle(Channels.HUMAN_VAULT_AUDIT_LOG, (event, limit?: number) => {
     assertTrustedIpcSender(event);
+    assertHumanVaultUnlocked();
     return vault.readAuditLog(limit);
   });
 }

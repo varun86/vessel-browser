@@ -4,10 +4,16 @@ import { readAuditLog } from "../vault/audit";
 import * as vaultManager from "../vault/manager";
 import { trackVaultAction } from "../telemetry/posthog";
 import { assertOptionalString, assertString, assertTrustedIpcSender } from "./common";
+import { assertFeatureUnlocked } from "../premium/manager";
+
+function assertVaultUnlocked(): void {
+  assertFeatureUnlocked("vault", "Agent Credential Vault");
+}
 
 export function registerVaultHandlers(): void {
   ipcMain.handle(Channels.VAULT_LIST, (event) => {
     assertTrustedIpcSender(event);
+    assertVaultUnlocked();
     return vaultManager.listEntries();
   });
 
@@ -25,6 +31,7 @@ export function registerVaultHandlers(): void {
       },
     ) => {
       assertTrustedIpcSender(event);
+      assertVaultUnlocked();
       if (!entry || typeof entry !== "object") {
         throw new Error("Invalid vault entry");
       }
@@ -68,6 +75,7 @@ export function registerVaultHandlers(): void {
       }>,
     ) => {
       assertTrustedIpcSender(event);
+      assertVaultUnlocked();
       assertString(id, "id");
       if (!updates || typeof updates !== "object") {
         throw new Error("Invalid updates");
@@ -78,6 +86,7 @@ export function registerVaultHandlers(): void {
 
   ipcMain.handle(Channels.VAULT_REMOVE, (event, id: string) => {
     assertTrustedIpcSender(event);
+    assertVaultUnlocked();
     assertString(id, "id");
     trackVaultAction("credential_removed");
     return vaultManager.removeEntry(id);
@@ -85,6 +94,7 @@ export function registerVaultHandlers(): void {
 
   ipcMain.handle(Channels.VAULT_AUDIT_LOG, (event, limit?: number) => {
     assertTrustedIpcSender(event);
+    assertVaultUnlocked();
     return readAuditLog(limit);
   });
 }
