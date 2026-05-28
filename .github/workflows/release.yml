@@ -64,6 +64,8 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
+      - name: Set up npm
+        run: npm install --global npm@11.16.0
       - name: Cache Electron downloads
         uses: actions/cache@v5
         with:
@@ -118,6 +120,9 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
+
+      - name: Set up npm
+        run: npm install --global npm@11.16.0
 
       - run: npm ci
       - name: Validate Windows signing configuration
@@ -219,6 +224,9 @@ jobs:
           node-version-file: .node-version
           cache: npm
 
+      - name: Set up npm
+        run: npm install --global npm@11.16.0
+
       - run: npm ci
 
       - name: Sync package version
@@ -263,6 +271,9 @@ jobs:
           node-version-file: .node-version
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      - name: Set up npm
+        run: npm install --global npm@11.16.0
 
       - name: Install dependencies
         run: npm ci
