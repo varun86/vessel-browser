@@ -83,7 +83,7 @@ jobs:
           cache: npm
 
       - name: Set up npm
-        run: npm install --global npm@11.16.0
+        run: corepack prepare npm@11.16.0 --activate
 
       - name: Cache Electron downloads
         uses: actions/cache@v5
@@ -96,18 +96,18 @@ jobs:
             ${{ runner.os }}-electron-
 
       - name: Install dependencies
-        run: npm ci
+        run: corepack npm ci
 
       - name: Smoke test
-        run: xvfb-run -a npm run smoke:test
+        run: xvfb-run -a corepack npm run smoke:test
 
       - name: Sync package metadata
         env:
           VERSION: ${{ needs.version.outputs.version }}
-        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+        run: corepack npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Build electron app for snap
-        run: npm run build && bash scripts/ci-electron-builder.sh --config electron-builder.config.cjs --linux dir --publish never
+        run: corepack npm run build && bash scripts/ci-electron-builder.sh --config electron-builder.config.cjs --linux dir --publish never
 
       - name: Install Snapcraft
         run: sudo snap install snapcraft --classic

@@ -21,7 +21,7 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - name: Set up npm
-        run: npm install --global npm@11.16.0
+        run: corepack prepare npm@11.16.0 --activate
       - name: Cache Electron downloads
         uses: actions/cache@v5
         with:
@@ -32,12 +32,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-electron-
 
-      - run: npm ci
+      - run: corepack npm ci
       - name: Smoke test
-        run: xvfb-run -a npm run smoke:test
+        run: xvfb-run -a corepack npm run smoke:test
 
       - name: Build & package
-        run: npm run build && bash scripts/ci-electron-builder.sh --config electron-builder.config.cjs --linux --publish never
+        run: corepack npm run build && bash scripts/ci-electron-builder.sh --config electron-builder.config.cjs --linux --publish never
 
       - name: Generate checksums
         run: sha256sum dist/*.AppImage > dist/SHASUMS256-linux.txt
@@ -72,9 +72,9 @@ jobs:
           cache: npm
 
       - name: Set up npm
-        run: npm install --global npm@11.16.0
+        run: corepack prepare npm@11.16.0 --activate
 
-      - run: npm ci
+      - run: corepack npm ci
       - name: Validate Windows signing configuration for signed preview builds
         if: env.WINDOWS_REQUIRE_CODE_SIGNING == 'true'
         shell: pwsh
@@ -98,7 +98,7 @@ jobs:
           }
 
       - name: Build & package
-        run: npm run build && npx electron-builder --config electron-builder.config.cjs --win --publish never
+        run: corepack npm run build && npx electron-builder --config electron-builder.config.cjs --win --publish never
 
       - name: Verify Windows Authenticode signatures
         if: env.WINDOWS_REQUIRE_CODE_SIGNING == 'true'
