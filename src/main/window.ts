@@ -351,7 +351,7 @@ export function layoutViews(state: WindowState): void {
       width: sidebarWidth + resizeHandleOverlap,
       height: height - chromeHeight,
     });
-  } else {
+  } else if (uiState.sidebarPanelMode === "closed") {
     sidebarView.setBounds({ x: width, y: 0, width: 0, height: 0 });
   }
 
