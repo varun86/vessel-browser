@@ -32,6 +32,7 @@ import DropdownSelect from "../shared/DropdownSelect";
 import AutomationTab from "./AutomationTab";
 import { ResearchDesk } from "./ResearchDesk";
 import PageDiffTimeline from "./PageDiffTimeline";
+import SidebarWindowControls from "./SidebarWindowControls";
 import vesselLogo from "../../assets/vessel-logo-transparent.png";
 import "./ai.css";
 
@@ -134,9 +135,12 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
   const {
     sidebarOpen,
     sidebarWidth,
+    sidebarDetached,
     resizeSidebar,
     commitResize,
     toggleSidebar,
+    popOutSidebar,
+    dockSidebar,
     openSettings,
   } = useUI();
   const { activeTab, createTab } = useTabs();
@@ -557,6 +561,7 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
   });
 
   const startResize = (e: PointerEvent) => {
+    if (sidebarDetached()) return;
     e.preventDefault();
     const target = e.currentTarget as HTMLElement;
     target.setPointerCapture(e.pointerId);
@@ -892,12 +897,17 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
 
   return (
     <Show when={props.forceOpen || sidebarOpen()}>
-      <div class="sidebar" style={{ width: `${sidebarWidth()}px` }}>
-        <div
-          class="sidebar-resize-handle"
-          classList={{ dragging: isDragging() }}
-          onPointerDown={startResize}
-        />
+      <div
+        class="sidebar"
+        style={{ width: sidebarDetached() ? "100%" : `${sidebarWidth()}px` }}
+      >
+        <Show when={!sidebarDetached()}>
+          <div
+            class="sidebar-resize-handle"
+            classList={{ dragging: isDragging() }}
+            onPointerDown={startResize}
+          />
+        </Show>
         <div class="sidebar-header">
           <div class="sidebar-brand">
             <img class="sidebar-logo" src={vesselLogo} alt="Vessel" />
@@ -911,27 +921,12 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
             >
               Clear
             </button>
-            <button
-              class="sidebar-close"
-              onClick={() => void toggleSidebar()}
-              title="Close AI chat (Esc)"
-              aria-label="Close AI chat"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 14 14"
-                aria-hidden="true"
-              >
-                <path
-                  d="M3.5 3.5l7 7M10.5 3.5l-7 7"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.4"
-                  stroke-linecap="round"
-                />
-              </svg>
-            </button>
+            <SidebarWindowControls
+              detached={sidebarDetached}
+              popOut={popOutSidebar}
+              dock={dockSidebar}
+              close={toggleSidebar}
+            />
           </div>
         </div>
 
