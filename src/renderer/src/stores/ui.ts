@@ -1,4 +1,5 @@
 import { createSignal } from "solid-js";
+import type { SidebarPanelState } from "../../../shared/types";
 
 const DEFAULT_SIDEBAR_WIDTH = 400;
 const MIN_SIDEBAR = 240;
@@ -6,6 +7,7 @@ const MAX_SIDEBAR = 800;
 
 const [sidebarOpen, setSidebarOpen] = createSignal(true);
 const [sidebarWidth, setSidebarWidth] = createSignal(DEFAULT_SIDEBAR_WIDTH);
+const [sidebarDetached, setSidebarDetached] = createSignal(false);
 
 // Sync initial sidebar width from persisted settings so the sidebar view
 // (a separate WebContentsView) renders at the correct width on first open
@@ -25,23 +27,45 @@ const [devtoolsPanelOpen, setDevtoolsPanelOpen] = createSignal(false);
 // Track last IPC time to throttle IPC calls (not layout updates)
 let lastIpcTime = 0;
 const IPC_THROTTLE_MS = 8; // ~120fps max for IPC (layout is already 60fps via RAF)
+let sidebarStateListenerInitialized = false;
 
 function clampSidebarWidth(width: number): number {
   return Math.max(MIN_SIDEBAR, Math.min(MAX_SIDEBAR, Math.round(width)));
 }
 
+function applySidebarState(result: SidebarPanelState): void {
+  setSidebarOpen(result.open);
+  setSidebarWidth(result.width);
+  setSidebarDetached(result.detached);
+}
+
+function ensureSidebarStateListener(): void {
+  if (sidebarStateListenerInitialized) return;
+  sidebarStateListenerInitialized = true;
+  window.vessel?.ui?.onSidebarStateUpdate?.(applySidebarState);
+}
+
 export function useUI() {
+  ensureSidebarStateListener();
   return {
     sidebarOpen,
     sidebarWidth,
+    sidebarDetached,
     focusMode,
     commandBarOpen,
     settingsOpen,
     devtoolsPanelOpen,
     toggleSidebar: async () => {
       const result = await window.vessel.ui.toggleSidebar();
-      setSidebarOpen(result.open);
-      setSidebarWidth(result.width);
+      applySidebarState(result);
+    },
+    popOutSidebar: async () => {
+      const result = await window.vessel.ui.popOutSidebar();
+      applySidebarState(result);
+    },
+    dockSidebar: async () => {
+      const result = await window.vessel.ui.dockSidebar();
+      applySidebarState(result);
     },
     resizeSidebar: (width: number) => {
       // Clamp + update CSS immediately via Solid signal

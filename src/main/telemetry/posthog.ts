@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { loadSettings } from "../config/settings";
 import { isPremium } from "../premium/manager";
+import { isAirGapped } from "../config/air-gapped";
 
 /**
  * Vessel Telemetry — anonymous usage analytics via PostHog.
@@ -97,6 +98,7 @@ let flushTimer: ReturnType<typeof setInterval> | null = null;
 let sessionStartedAt: number | null = null;
 
 function isEnabled(): boolean {
+  if (isAirGapped()) return false;
   if (POSTHOG_API_KEY === "YOUR_POSTHOG_KEY_HERE") return false;
   if (process.env.VESSEL_DEV === "1") return false;
   return loadSettings().telemetryEnabled !== false;

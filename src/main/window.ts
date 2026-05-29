@@ -3,9 +3,13 @@ import { existsSync } from "fs";
 import path from "path";
 import { TabManager, type TabStateChangeMeta } from "./tabs/tab-manager";
 import { loadSettings } from "./config/settings";
-import { Channels } from "../shared/channels";
 import type { UIState, TabState } from "../shared/types";
 import { capturePageSnapshot } from "./content/page-diff-monitor";
+import {
+  isSidebarAttached,
+  layoutDetachedSidebar,
+  type SidebarPanelHostState,
+} from "./sidebar-panel";
 
 /**
  * Ensure clipboard keyboard shortcuts (Ctrl+C/V/X/A) work in a WebContentsView.
@@ -40,8 +44,7 @@ const DEFAULT_DEVTOOLS_PANEL_HEIGHT = 250;
 const MIN_DEVTOOLS_PANEL = 120;
 const MAX_DEVTOOLS_PANEL = 600;
 
-export interface WindowState {
-  mainWindow: BaseWindow;
+export interface WindowState extends SidebarPanelHostState {
   chromeView: WebContentsView;
   sidebarView: WebContentsView;
   devtoolsPanelView: WebContentsView;
@@ -187,7 +190,7 @@ async function showSidebarContextMenu(
   menu.popup({ window: mainWindow });
 }
 
-function getWindowIconPath(): string | undefined {
+export function getWindowIconPath(): string | undefined {
   const candidates = [
     path.join(app.getAppPath(), "resources", "vessel-icon.png"),
     path.join(process.resourcesPath, "vessel-icon.png"),
@@ -239,11 +242,6 @@ export function createMainWindow(
   });
 
   sidebarView.setBackgroundColor("#00000000");
-  // Replace Electron's default menu with a native sidebar-aware context menu.
-  sidebarView.webContents.on("context-menu", (event, params) => {
-    event.preventDefault();
-    void showSidebarContextMenu(mainWindow, sidebarView, params);
-  });
   mainWindow.contentView.addChildView(sidebarView);
 
   const devtoolsPanelView = new WebContentsView({
@@ -266,7 +264,7 @@ export function createMainWindow(
 
   const settings = loadSettings();
   const uiState: UIState = {
-    sidebarOpen: true,
+    sidebarPanelMode: "docked",
     sidebarWidth: settings.sidebarWidth,
     focusMode: false,
     settingsOpen: false,
@@ -289,6 +287,8 @@ export function createMainWindow(
 
   const state: WindowState = {
     mainWindow,
+    sidebarWindow: null,
+    sidebarWindowClosing: false,
     chromeView,
     sidebarView,
     devtoolsPanelView,
@@ -299,6 +299,21 @@ export function createMainWindow(
   mainWindow.on("resize", () => layoutViews(state));
   mainWindow.on("show", () => layoutViews(state));
   mainWindow.on("focus", () => layoutViews(state));
+  mainWindow.on("closed", () => {
+    const sidebarWindow = state.sidebarWindow;
+    if (!sidebarWindow) return;
+    state.sidebarWindow = null;
+    state.sidebarWindowClosing = true;
+    sidebarWindow.close();
+  });
+  sidebarView.webContents.on("context-menu", (event, params) => {
+    event.preventDefault();
+    void showSidebarContextMenu(
+      state.sidebarWindow ?? state.mainWindow,
+      sidebarView,
+      params,
+    );
+  });
   layoutViews(state);
 
   return state;
@@ -315,7 +330,8 @@ export function layoutViews(state: WindowState): void {
   } = state;
   const [width, height] = mainWindow.getContentSize();
   const chromeHeight = uiState.focusMode ? 0 : CHROME_HEIGHT;
-  const sidebarWidth = uiState.sidebarOpen ? uiState.sidebarWidth : 0;
+  const sidebarAttached = isSidebarAttached(state);
+  const sidebarWidth = sidebarAttached ? uiState.sidebarWidth : 0;
   const devtoolsHeight = uiState.devtoolsPanelOpen
     ? uiState.devtoolsPanelHeight
     : 0;
@@ -328,14 +344,14 @@ export function layoutViews(state: WindowState): void {
   }
 
   const resizeHandleOverlap = 6;
-  if (uiState.sidebarOpen) {
+  if (sidebarAttached) {
     sidebarView.setBounds({
       x: width - sidebarWidth - resizeHandleOverlap,
       y: chromeHeight,
       width: sidebarWidth + resizeHandleOverlap,
       height: height - chromeHeight,
     });
-  } else {
+  } else if (uiState.sidebarPanelMode === "closed") {
     sidebarView.setBounds({ x: width, y: 0, width: 0, height: 0 });
   }
 
@@ -355,8 +371,10 @@ export function layoutViews(state: WindowState): void {
   // Re-stack views so chrome, sidebar, and devtools are always on top of tab content.
   mainWindow.contentView.removeChildView(chromeView);
   mainWindow.contentView.addChildView(chromeView);
-  mainWindow.contentView.removeChildView(sidebarView);
-  mainWindow.contentView.addChildView(sidebarView);
+  if (uiState.sidebarPanelMode !== "detached") {
+    mainWindow.contentView.removeChildView(sidebarView);
+    mainWindow.contentView.addChildView(sidebarView);
+  }
   mainWindow.contentView.removeChildView(devtoolsPanelView);
   mainWindow.contentView.addChildView(devtoolsPanelView);
 
@@ -381,20 +399,22 @@ export function resizeSidebarViews(state: WindowState): void {
     state;
   const [width, height] = mainWindow.getContentSize();
   const chromeHeight = uiState.focusMode ? 0 : CHROME_HEIGHT;
-  const sidebarWidth = uiState.sidebarOpen ? uiState.sidebarWidth : 0;
+  const sidebarWidth = isSidebarAttached(state) ? uiState.sidebarWidth : 0;
   const devtoolsHeight = uiState.devtoolsPanelOpen
     ? uiState.devtoolsPanelHeight
     : 0;
   const resizeHandleOverlap = 6;
   const contentWidth = width - sidebarWidth;
 
-  // Position sidebar below chrome bar (same as layoutViews)
-  sidebarView.setBounds({
-    x: width - sidebarWidth - resizeHandleOverlap,
-    y: chromeHeight,
-    width: sidebarWidth + resizeHandleOverlap,
-    height: height - chromeHeight,
-  });
+  if (uiState.sidebarPanelMode !== "detached") {
+    // Position sidebar below chrome bar (same as layoutViews)
+    sidebarView.setBounds({
+      x: width - sidebarWidth - resizeHandleOverlap,
+      y: chromeHeight,
+      width: sidebarWidth + resizeHandleOverlap,
+      height: height - chromeHeight,
+    });
+  }
 
   if (uiState.devtoolsPanelOpen) {
     devtoolsPanelView.setBounds({

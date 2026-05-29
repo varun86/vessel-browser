@@ -445,8 +445,16 @@ export interface AgentRuntimeState {
   undoInfo: { actionName: string; capturedAt: string } | null;
 }
 
+export type SidebarPanelMode = "closed" | "docked" | "detached";
+
+export interface SidebarPanelState {
+  open: boolean;
+  width: number;
+  detached: boolean;
+}
+
 export interface UIState {
-  sidebarOpen: boolean;
+  sidebarPanelMode: SidebarPanelMode;
   sidebarWidth: number;
   focusMode: boolean;
   settingsOpen: boolean;
@@ -589,6 +597,7 @@ export interface RuntimeHealthState {
   userDataPath: string;
   settingsPath: string;
   startupIssues: RuntimeHealthIssue[];
+  airGapped: boolean;
   mcp: {
     configuredPort: number;
     activePort: number | null;

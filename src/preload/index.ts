@@ -23,6 +23,7 @@ import type {
   ScheduledJob,
   SecurityState,
   SessionSnapshot,
+  SidebarPanelState,
   DownloadRecord,
   PermissionRecord,
   UpdateCheckResult,
@@ -312,6 +313,8 @@ const api = {
       ipcRenderer.invoke(Channels.SIDEBAR_RESIZE, width),
     commitSidebarResize: () =>
       ipcRenderer.invoke(Channels.SIDEBAR_RESIZE_COMMIT),
+    popOutSidebar: () => ipcRenderer.invoke(Channels.SIDEBAR_POPOUT),
+    dockSidebar: () => ipcRenderer.invoke(Channels.SIDEBAR_DOCK),
     rendererReady: (view: "chrome" | "sidebar" | "devtools") =>
       ipcRenderer.send(Channels.RENDERER_VIEW_READY, view),
     onSidebarContextMenu: (
@@ -327,6 +330,12 @@ const api = {
       const handler = (_: unknown, tab: string) => cb(tab);
       ipcRenderer.on(Channels.SIDEBAR_NAVIGATE, handler);
       return () => ipcRenderer.removeListener(Channels.SIDEBAR_NAVIGATE, handler);
+    },
+    onSidebarStateUpdate: (cb: (state: SidebarPanelState) => void): (() => void) => {
+      const handler = (_: unknown, state: SidebarPanelState) => cb(state);
+      ipcRenderer.on(Channels.SIDEBAR_STATE_UPDATE, handler);
+      return () =>
+        ipcRenderer.removeListener(Channels.SIDEBAR_STATE_UPDATE, handler);
     },
     toggleFocusMode: () => ipcRenderer.invoke(Channels.FOCUS_MODE_TOGGLE),
     setSettingsVisibility: (open: boolean) =>

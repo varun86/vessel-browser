@@ -1,6 +1,7 @@
 import { loadSettings, setSetting } from "../config/settings";
 import type { PremiumState, PremiumStatus } from "../../shared/types";
 import { createLogger } from "../../shared/logger";
+import { isAirGapped } from "../config/air-gapped";
 import {
   errorResult,
   getErrorMessage,
@@ -187,6 +188,9 @@ export function assertFeatureUnlocked(
 export async function getCheckoutUrl(
   email?: string,
 ): Promise<Result<{ url: string }>> {
+  if (isAirGapped()) {
+    return errorResult("Checkout is unavailable in air-gapped mode.");
+  }
   try {
     const params = new URLSearchParams();
     if (email) params.set("email", email);
@@ -212,6 +216,9 @@ export async function getCheckoutUrl(
  * Open the Stripe Customer Portal for subscription management.
  */
 export async function getPortalUrl(): Promise<Result<{ url: string }>> {
+  if (isAirGapped()) {
+    return errorResult("Billing portal is unavailable in air-gapped mode.");
+  }
   const current = loadSettings().premium;
   const identifier = current.verificationToken;
 
@@ -252,6 +259,10 @@ export async function getPortalUrl(): Promise<Result<{ url: string }>> {
 export async function verifySubscription(
   identifier?: string,
 ): Promise<PremiumState> {
+  if (isAirGapped()) {
+    return loadSettings().premium;
+  }
+
   const current = loadSettings().premium;
   const verificationIdentifier =
     identifier || current.verificationToken || current.customerId;
@@ -303,6 +314,10 @@ export async function verifySubscription(
 export async function requestActivationCode(
   email: string,
 ): Promise<ActivationCodeStartResult> {
+  if (isAirGapped()) {
+    return errorResult("Activation codes are unavailable in air-gapped mode.");
+  }
+
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) {
     return errorResult("Email is required");
@@ -340,6 +355,12 @@ export async function verifyActivationCode(
   code: string,
   challengeToken: string,
 ): Promise<ActivationCodeVerifyResult> {
+  if (isAirGapped()) {
+    return errorResult("Activation codes are unavailable in air-gapped mode.", {
+      state: getPremiumState(),
+    });
+  }
+
   const normalizedEmail = email.trim().toLowerCase();
   const trimmedCode = code.trim();
   if (!normalizedEmail) {
@@ -400,6 +421,7 @@ let revalidationTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startBackgroundRevalidation(): void {
   if (revalidationTimer) return;
+  if (isAirGapped()) return;
 
   // Check on startup if we need to revalidate
   const { premium } = loadSettings();
