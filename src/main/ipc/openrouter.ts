@@ -4,6 +4,7 @@ import type { ProviderConfig, VesselSettings } from "../../shared/types";
 import { PROVIDERS } from "../../shared/providers";
 import { createLogger } from "../../shared/logger";
 import { startOpenRouterOAuth, cancelOpenRouterOAuth } from "../ai/openrouter-oauth";
+import { isAirGapped } from "../config/air-gapped";
 import { assertTrustedIpcSender } from "./common";
 
 const logger = createLogger("OpenRouterIPC");
@@ -18,6 +19,14 @@ export function registerOpenRouterHandlers(
 ): void {
   ipcMain.handle(Channels.OPENROUTER_START_AUTH, async (event) => {
     assertTrustedIpcSender(event);
+
+    if (isAirGapped()) {
+      return {
+        ok: false as const,
+        error: "OpenRouter authentication is unavailable in air-gapped mode.",
+      };
+    }
+
     const wc: WebContents | undefined = event.sender;
     if (!wc || wc.isDestroyed()) {
       return {

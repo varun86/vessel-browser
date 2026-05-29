@@ -1,9 +1,22 @@
 import { session } from "electron";
 import { getAdBlockDecision } from "./ad-blocking-rules";
+import type { AdBlockDecision, AdBlockRequestDetails } from "./ad-blocking-rules";
 import type { TabManager } from "../tabs/tab-manager";
+import { getAirGapBlockReason } from "../config/air-gapped";
 
 let installed = false;
 const defaultSessionTabManagers = new Set<TabManager>();
+
+export function getRequestFilterDecision(
+  details: AdBlockRequestDetails,
+  adBlockingEnabled: boolean,
+): AdBlockDecision | null {
+  if (getAirGapBlockReason(details.url)) {
+    return { cancel: true };
+  }
+
+  return adBlockingEnabled ? getAdBlockDecision(details) : null;
+}
 
 export function installAdBlocking(tabManager: TabManager): void {
   defaultSessionTabManagers.add(tabManager);
@@ -14,19 +27,19 @@ export function installAdBlocking(tabManager: TabManager): void {
     const webContentsId =
       typeof details.webContentsId === "number" ? details.webContentsId : null;
     if (webContentsId == null) {
-      callback({});
+      callback(getRequestFilterDecision(details, false) ?? {});
       return;
     }
 
     const manager = [...defaultSessionTabManagers].find((candidate) =>
       candidate.findTabByWebContentsId(webContentsId),
     );
-    if (!manager?.isAdBlockingEnabledForWebContents(webContentsId)) {
-      callback({});
-      return;
-    }
-
-    callback(getAdBlockDecision(details));
+    callback(
+      getRequestFilterDecision(
+        details,
+        manager?.isAdBlockingEnabledForWebContents(webContentsId) ?? false,
+      ) ?? {},
+    );
   });
 }
 
@@ -46,15 +59,15 @@ export function installAdBlockingForSession(
     const webContentsId =
       typeof details.webContentsId === "number" ? details.webContentsId : null;
     if (webContentsId == null) {
-      callback({});
+      callback(getRequestFilterDecision(details, false) ?? {});
       return;
     }
 
-    if (!tabManager.isAdBlockingEnabledForWebContents(webContentsId)) {
-      callback({});
-      return;
-    }
-
-    callback(getAdBlockDecision(details));
+    callback(
+      getRequestFilterDecision(
+        details,
+        tabManager.isAdBlockingEnabledForWebContents(webContentsId),
+      ) ?? {},
+    );
   });
 }

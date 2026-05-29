@@ -1,5 +1,6 @@
 import { app } from "electron";
 import type { UpdateCheckResult } from "../../shared/types";
+import { isAirGapped } from "../config/air-gapped";
 import { openExternalAllowlisted } from "../security/external-open";
 
 const GITHUB_LATEST_RELEASE_API_URL = "https://api.github.com/repos/unmodeled-tyler/quanta-vessel-browser/releases/latest";
@@ -29,6 +30,16 @@ function compareVersions(a: string, b: string): number {
 export async function checkForUpdates(): Promise<UpdateCheckResult> {
   const currentVersion = app.getVersion();
   const checkedAt = new Date().toISOString();
+
+  if (isAirGapped()) {
+    return {
+      currentVersion,
+      latestVersion: null,
+      updateAvailable: false,
+      checkedAt,
+      error: "Update checks are disabled in air-gapped mode.",
+    };
+  }
 
   try {
     const response = await fetch(GITHUB_LATEST_RELEASE_API_URL, {
@@ -64,5 +75,8 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
 }
 
 export async function openUpdateDownload(): Promise<void> {
+  if (isAirGapped()) {
+    throw new Error("Update downloads are unavailable in air-gapped mode.");
+  }
   await openExternalAllowlisted(RELEASES_URL, { hosts: ["github.com"] });
 }

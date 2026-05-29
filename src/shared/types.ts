@@ -589,6 +589,7 @@ export interface RuntimeHealthState {
   userDataPath: string;
   settingsPath: string;
   startupIssues: RuntimeHealthIssue[];
+  airGapped: boolean;
   mcp: {
     configuredPort: number;
     activePort: number | null;

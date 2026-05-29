@@ -3,6 +3,7 @@ import type {
   RuntimeHealthIssue,
   RuntimeHealthState,
 } from "../../shared/types";
+import { isAirGapped } from "../config/air-gapped";
 
 type McpStatusChangeListener = (status: McpConnectionStatus) => void;
 type RuntimeHealthChangeListener = (state: RuntimeHealthState) => void;
@@ -42,6 +43,7 @@ const state: RuntimeHealthState = {
   userDataPath: "",
   settingsPath: "",
   startupIssues: [],
+  airGapped: isAirGapped(),
   mcp: {
     configuredPort: 3100,
     activePort: null,
@@ -76,6 +78,7 @@ export function getRuntimeHealth(): RuntimeHealthState {
     userDataPath: state.userDataPath,
     settingsPath: state.settingsPath,
     startupIssues: state.startupIssues.map((issue) => ({ ...issue })),
+    airGapped: state.airGapped,
     mcp: { ...state.mcp },
   };
 }

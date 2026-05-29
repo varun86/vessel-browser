@@ -1,5 +1,6 @@
 import type { DomainPolicy } from "../../shared/types";
 import { loadSettings } from "../config/settings";
+import { getAirGapBlockReason } from "../config/air-gapped";
 
 /**
  * Check whether navigation to a URL is permitted by the domain policy.
@@ -13,6 +14,9 @@ import { loadSettings } from "../config/settings";
  */
 export function checkDomainPolicy(url: string): string | null {
   if (!url || url.startsWith("about:")) return null;
+
+  const airGapBlockReason = getAirGapBlockReason(url);
+  if (airGapBlockReason) return airGapBlockReason;
 
   const settings = loadSettings();
   const policy: DomainPolicy = settings.domainPolicy;

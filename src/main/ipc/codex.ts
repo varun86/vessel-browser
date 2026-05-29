@@ -4,6 +4,7 @@ import { startCodexOAuth, cancelCodexOAuth } from "../ai/codex-oauth";
 import { writeStoredCodexTokens, clearStoredCodexTokens } from "../config/settings";
 import type { CodexAuthStatus } from "../../shared/types";
 import { createLogger } from "../../shared/logger";
+import { isAirGapped } from "../config/air-gapped";
 import { assertTrustedIpcSender } from "./common";
 
 const logger = createLogger("CodexIPC");
@@ -11,6 +12,14 @@ const logger = createLogger("CodexIPC");
 export function registerCodexHandlers(): void {
   ipcMain.handle(Channels.CODEX_START_AUTH, async (event) => {
     assertTrustedIpcSender(event);
+
+    if (isAirGapped()) {
+      return {
+        ok: false as const,
+        error: "Codex authentication is unavailable in air-gapped mode.",
+      };
+    }
+
     const wc: WebContents | undefined = event.sender;
     if (!wc || wc.isDestroyed()) {
       return {
