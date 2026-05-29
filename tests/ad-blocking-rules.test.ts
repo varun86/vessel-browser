@@ -9,6 +9,7 @@ import {
   shouldBlockRequest,
   type AdBlockRequestDetails,
 } from "../src/main/network/ad-blocking-rules";
+import { getRequestFilterDecision } from "../src/main/network/ad-blocking";
 
 const request = (
   overrides: Partial<AdBlockRequestDetails>,
@@ -145,4 +146,31 @@ test("getAdBlockDecision cancels blocked non-frame resources and explicitly allo
   assert.deepEqual(getAdBlockDecision(request({ url: "https://cdn.example/app.js" })), {
     cancel: false,
   });
+});
+
+test("request filter applies air-gap blocking before per-tab ad blocking", () => {
+  const original = process.env.VESSEL_AIR_GAPPED;
+  process.env.VESSEL_AIR_GAPPED = "1";
+  try {
+    assert.deepEqual(
+      getRequestFilterDecision(
+        request({ url: "https://cdn.example/app.js" }),
+        false,
+      ),
+      { cancel: true },
+    );
+    assert.equal(
+      getRequestFilterDecision(
+        request({ url: "http://localhost:11434/v1/models" }),
+        false,
+      ),
+      null,
+    );
+  } finally {
+    if (original === undefined) {
+      delete process.env.VESSEL_AIR_GAPPED;
+    } else {
+      process.env.VESSEL_AIR_GAPPED = original;
+    }
+  }
 });

@@ -13,6 +13,7 @@ import { OpenAICompatProvider } from "./provider-openai";
 import { PROVIDERS } from "../../shared/providers";
 import { CodexProvider, CODEX_CLIENT_VERSION } from "./provider-codex";
 import { readStoredCodexTokens } from "../config/settings";
+import { isAirGapped, isLocalProvider, isLocalBaseUrl } from "../config/air-gapped";
 import type { AgentToolProfile } from "./tool-profile";
 import { LLAMA_CPP_MIN_CTX_TOKENS, LLAMA_CPP_RECOMMENDED_CTX_TOKENS } from "./content-limits";
 
@@ -75,6 +76,16 @@ function validateProviderConnection(
 
   if (!meta) {
     return "Selected AI provider is not supported.";
+  }
+
+  if (isAirGapped()) {
+    if (meta.id === "custom") {
+      if (!isLocalBaseUrl(normalized.baseUrl)) {
+        return "Air-gapped mode only allows local AI providers. Use a localhost base URL for custom providers.";
+      }
+    } else if (!isLocalProvider(meta.id)) {
+      return `Air-gapped mode only allows local AI providers (Ollama, llama.cpp). ${meta.name} requires internet access.`;
+    }
   }
 
   if (meta.type !== "codex_oauth" && meta.requiresApiKey && !normalized.apiKey) {

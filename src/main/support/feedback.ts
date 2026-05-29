@@ -4,6 +4,7 @@ import {
   okResult,
   type Result,
 } from "../../shared/result";
+import { isAirGapped } from "../config/air-gapped";
 
 const SUPPORT_API =
   process.env.VESSEL_SUPPORT_API ||
@@ -26,6 +27,10 @@ function isValidEmail(email: string): boolean {
 export async function submitFeedback(
   payload: FeedbackPayload,
 ): Promise<Result> {
+  if (isAirGapped()) {
+    return errorResult("Feedback submission is disabled in air-gapped mode.");
+  }
+
   const email = payload.email.trim().toLowerCase();
   const message = payload.message.trim();
 

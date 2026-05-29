@@ -11,6 +11,10 @@ import {
   loadTrustedAppURL,
 } from "../src/main/network/url-safety";
 import { openExternalAllowlisted } from "../src/main/security/external-open";
+import {
+  getAirGapBlockReason,
+  isLocalBaseUrl,
+} from "../src/main/config/air-gapped";
 import { createCodexFunctionCallOutput } from "../src/main/ai/provider-codex";
 import { flushPersist, setSetting } from "../src/main/config/settings";
 import { requiresExplicitMcpApproval } from "../src/main/mcp/server";
@@ -19,7 +23,9 @@ import {
   assertToolUnlocked,
   getPortalUrl,
   isPremium,
+  verifyActivationCode,
 } from "../src/main/premium/manager";
+import { openUpdateDownload } from "../src/main/updates/checker";
 import { sanitizeTelemetryProperties } from "../src/main/telemetry/posthog";
 import {
   decodeEncryptionKeyFromStorage,
@@ -59,6 +65,33 @@ async function withMockFetch<T>(
     return await fn();
   } finally {
     globalThis.fetch = originalFetch;
+  }
+}
+
+function withAirGappedForTest<T>(value: boolean, fn: () => T): T {
+  const original = process.env.VESSEL_AIR_GAPPED;
+  process.env.VESSEL_AIR_GAPPED = value ? "1" : "0";
+  const restore = () => {
+    if (original === undefined) {
+      delete process.env.VESSEL_AIR_GAPPED;
+    } else {
+      process.env.VESSEL_AIR_GAPPED = original;
+    }
+  };
+
+  try {
+    const result = fn();
+    if (
+      result &&
+      typeof (result as Promise<unknown>).finally === "function"
+    ) {
+      return (result as Promise<unknown>).finally(restore) as T;
+    }
+    restore();
+    return result;
+  } catch (error) {
+    restore();
+    throw error;
   }
 }
 
@@ -132,6 +165,48 @@ test("internal data URL loader rejects non-html data URLs", async () => {
     () => loadInternalDataURL(wc, "data:text/plain,hello"),
     /Blocked unexpected internal data URL/,
   );
+});
+
+test("air-gapped policy allows only localhost network URLs", () => {
+  assert.equal(isLocalBaseUrl("http://localhost:11434/v1"), true);
+  assert.equal(isLocalBaseUrl("http://127.0.0.1:8080/v1"), true);
+  assert.equal(isLocalBaseUrl("http://[::1]:8080/v1"), true);
+  assert.equal(isLocalBaseUrl("https://api.openai.com/v1"), false);
+
+  withAirGappedForTest(true, () => {
+    assert.equal(getAirGapBlockReason("http://localhost:11434/v1"), null);
+    assert.equal(getAirGapBlockReason("http://127.0.0.1:8080/v1"), null);
+    assert.equal(getAirGapBlockReason("file:///tmp/vessel.html"), null);
+    assert.match(
+      getAirGapBlockReason("https://example.com") || "",
+      /Air-gapped mode blocked network access to example\.com/,
+    );
+  });
+
+  withAirGappedForTest(false, () => {
+    assert.equal(getAirGapBlockReason("https://example.com"), null);
+  });
+});
+
+test("air-gapped mode blocks secondary outbound actions", async () => {
+  await withAirGappedForTest(true, async () => {
+    await withMockFetch(
+      async () => {
+        throw new Error("Activation API should not be called in air-gapped mode");
+      },
+      async () => {
+        const result = await verifyActivationCode(
+          "premium@example.com",
+          "123456",
+          "challenge",
+        );
+        assert.equal(result.ok, false);
+        assert.match(result.error || "", /air-gapped mode/);
+      },
+    );
+
+    await assert.rejects(openUpdateDownload(), /air-gapped mode/);
+  });
 });
 
 test("vault encryption key storage round-trips arbitrary binary keys", () => {
