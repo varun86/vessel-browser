@@ -9,7 +9,12 @@ import {
   setSetting,
   SETTABLE_KEYS,
 } from "../config/settings";
-import { layoutViews, resizeSidebarViews, MIN_DEVTOOLS_PANEL, MAX_DEVTOOLS_PANEL, CHROME_HEIGHT, type WindowState } from "../window";
+import {
+  layoutViews,
+  MIN_DEVTOOLS_PANEL,
+  MAX_DEVTOOLS_PANEL,
+  type WindowState,
+} from "../window";
 import {
   getRuntimeHealth,
   onRuntimeHealthChange,
@@ -77,6 +82,7 @@ import { registerSessionHandlers } from "./sessions";
 import { registerSecurityHandlers } from "./security";
 import { registerCodexHandlers } from "./codex";
 import { registerOpenRouterHandlers } from "./openrouter";
+import { registerSidebarHandlers } from "./sidebar";
 import { submitFeedback } from "../support/feedback";
 import { clearByTimeRange } from "../history/manager";
 import { clearDownloads, listDownloads, openDownload, setDownloadBroadcaster, showDownloadInFolder } from "../network/download-manager";
@@ -167,30 +173,8 @@ export function registerIpcHandlers(
     return false;
   });
 
-  let sidebarResizeRecoveryTimer: NodeJS.Timeout | null = null;
-  let sidebarResizeActive = false;
   let runtimeUpdateTimer: NodeJS.Timeout | null = null;
   let pendingRuntimeState: AgentRuntimeState | null = null;
-
-  const clearSidebarResizeRecoveryTimer = () => {
-    if (!sidebarResizeRecoveryTimer) return;
-    clearTimeout(sidebarResizeRecoveryTimer);
-    sidebarResizeRecoveryTimer = null;
-  };
-
-  const restoreSidebarLayoutAfterResize = () => {
-    clearSidebarResizeRecoveryTimer();
-    if (!sidebarResizeActive) return;
-    sidebarResizeActive = false;
-    layoutViews(windowState);
-  };
-
-  const scheduleSidebarResizeRecovery = () => {
-    clearSidebarResizeRecoveryTimer();
-    sidebarResizeRecoveryTimer = setTimeout(() => {
-      restoreSidebarLayoutAfterResize();
-    }, 1200);
-  };
 
   const flushRuntimeUpdate = () => {
     runtimeUpdateTimer = null;
@@ -565,98 +549,11 @@ export function registerIpcHandlers(
     }
   });
 
-  // --- UI handlers ---
-
-  ipcMain.handle(Channels.SIDEBAR_TOGGLE, (event) => {
-    requireTrusted(event);
-    windowState.uiState.sidebarOpen = !windowState.uiState.sidebarOpen;
-    layoutViews(windowState);
-    return {
-      open: windowState.uiState.sidebarOpen,
-      width: windowState.uiState.sidebarWidth,
-    };
-  });
-
-  ipcMain.handle(Channels.SIDEBAR_NAVIGATE, (event, tab: string) => {
-    requireTrusted(event);
-    assertString(tab, "tab");
-    if (!windowState.uiState.sidebarOpen) {
-      windowState.uiState.sidebarOpen = true;
-      layoutViews(windowState);
-    }
-    if (!sidebarView.webContents.isDestroyed()) {
-      sidebarView.webContents.send(Channels.SIDEBAR_NAVIGATE, tab);
-    }
-    return {
-      open: windowState.uiState.sidebarOpen,
-      width: windowState.uiState.sidebarWidth,
-    };
-  });
-
-  ipcMain.handle(Channels.SIDEBAR_RESIZE_START, (event) => {
-    requireTrusted(event);
-    sidebarResizeActive = true;
-    clearSidebarResizeRecoveryTimer();
-    // Position sidebar below chrome bar (like normal layout) but expand width for pointer capture
-    const [width, height] = windowState.mainWindow.getContentSize();
-    const chromeHeight = windowState.uiState.focusMode ? 0 : CHROME_HEIGHT;
-    const sidebarWidth = windowState.uiState.sidebarWidth;
-    const resizeHandleOverlap = 6;
-    windowState.sidebarView.setBounds({
-      x: width - sidebarWidth - resizeHandleOverlap,
-      y: chromeHeight,
-      width: sidebarWidth + resizeHandleOverlap,
-      height: height - chromeHeight,
-    });
-    scheduleSidebarResizeRecovery();
-  });
-
-  ipcMain.handle(Channels.SIDEBAR_RESIZE, (event, width: number) => {
-    requireTrusted(event);
-    assertNumber(width, "width");
-    const clamped = Math.max(240, Math.min(800, Math.round(width)));
-    windowState.uiState.sidebarWidth = clamped;
-    resizeSidebarViews(windowState);
-    // Note: recovery timer is NOT rescheduled here - only on RESIZE_START
-    // This prevents lag during rapid resize movements
-    return clamped;
-  });
-
-  ipcMain.handle(Channels.SIDEBAR_RESIZE_COMMIT, (event) => {
-    requireTrusted(event);
-    sidebarResizeActive = false;
-    clearSidebarResizeRecoveryTimer();
-    setSetting("sidebarWidth", windowState.uiState.sidebarWidth);
-    layoutViews(windowState);
-  });
-
-  ipcMain.on(
-    Channels.RENDERER_VIEW_READY,
-    (event, view: "chrome" | "sidebar" | "devtools") => {
-      requireTrusted(event);
-      if (view !== "sidebar") return;
-      if (!windowState.uiState.sidebarOpen) {
-        windowState.uiState.sidebarOpen = true;
-        layoutViews(windowState);
-      }
-    },
-  );
-
   ipcMain.handle(Channels.FOCUS_MODE_TOGGLE, (event) => {
     requireTrusted(event);
     windowState.uiState.focusMode = !windowState.uiState.focusMode;
     layoutViews(windowState);
     return windowState.uiState.focusMode;
-  });
-
-  ipcMain.handle(Channels.SETTINGS_VISIBILITY, (event, open: boolean) => {
-    requireTrusted(event);
-    windowState.uiState.settingsOpen = open;
-    if (open) {
-      windowState.uiState.sidebarOpen = false;
-    }
-    layoutViews(windowState);
-    return windowState.uiState.settingsOpen;
   });
 
   // --- Settings handlers ---
@@ -929,6 +826,7 @@ export function registerIpcHandlers(
 
   registerCodexHandlers();
   registerOpenRouterHandlers(applySettingChange);
+  registerSidebarHandlers(windowState, requireTrusted);
 
   // --- Automation kits ---
 
