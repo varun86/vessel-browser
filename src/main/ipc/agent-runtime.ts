@@ -1,19 +1,20 @@
 import { app, ipcMain } from "electron";
+import { z } from "zod";
 import { Channels } from "../../shared/channels";
 import { trackApprovalModeChanged } from "../telemetry/posthog";
 import { setSetting } from "../config/settings";
 import { onRuntimeHealthChange } from "../health/runtime-health";
 import {
-  assertString,
   assertTrustedIpcSender,
+  parseIpc,
   sendSafe,
   type SendToRendererViews,
 } from "./common";
 import type { ApprovalMode, AgentRuntimeState, SessionSnapshot } from "../../shared/types";
 import type { AgentRuntime } from "../agent/runtime";
 
-const VALID_APPROVAL_MODES = ["auto", "confirm-dangerous", "manual"] as const;
-type ValidApprovalMode = typeof VALID_APPROVAL_MODES[number];
+const ApprovalModeSchema = z.enum(["auto", "confirm-dangerous", "manual"]);
+const CheckpointIdSchema = z.string().min(1);
 
 export function registerAgentRuntimeHandlers(
   runtime: AgentRuntime,
@@ -75,13 +76,10 @@ export function registerAgentRuntimeHandlers(
     Channels.AGENT_SET_APPROVAL_MODE,
     (event, mode: ApprovalMode): AgentRuntimeState => {
       assertTrustedIpcSender(event);
-      assertString(mode, "mode");
-      if (!VALID_APPROVAL_MODES.includes(mode as ValidApprovalMode)) {
-        throw new Error(`Invalid approval mode: ${mode}`);
-      }
-      trackApprovalModeChanged(mode);
-      setSetting("approvalMode", mode);
-      return runtime.setApprovalMode(mode);
+      const validated = parseIpc(ApprovalModeSchema, mode, "mode");
+      trackApprovalModeChanged(validated);
+      setSetting("approvalMode", validated);
+      return runtime.setApprovalMode(validated);
     },
   );
 
@@ -103,12 +101,15 @@ export function registerAgentRuntimeHandlers(
 
   ipcMain.handle(Channels.AGENT_CHECKPOINT_RESTORE, (event, checkpointId: string) => {
     assertTrustedIpcSender(event);
-    return runtime.restoreCheckpoint(checkpointId);
+    return runtime.restoreCheckpoint(parseIpc(CheckpointIdSchema, checkpointId, "checkpointId"));
   });
 
   ipcMain.handle(Channels.AGENT_CHECKPOINT_UPDATE_NOTE, (event, checkpointId: string, note?: string) => {
     assertTrustedIpcSender(event);
-    return runtime.updateCheckpointNote(checkpointId, note || "");
+    return runtime.updateCheckpointNote(
+      parseIpc(CheckpointIdSchema, checkpointId, "checkpointId"),
+      note || "",
+    );
   });
 
   ipcMain.handle(Channels.AGENT_UNDO_LAST_ACTION, (event) => {

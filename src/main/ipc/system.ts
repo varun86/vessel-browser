@@ -1,4 +1,5 @@
 import { ipcMain, session } from "electron";
+import { z } from "zod";
 import { Channels } from "../../shared/channels";
 import { clearByTimeRange } from "../history/manager";
 import {
@@ -17,8 +18,8 @@ import {
 import { checkForUpdates, openUpdateDownload } from "../updates/checker";
 import { togglePictureInPicture } from "./picture-in-picture";
 import {
-  assertString,
   assertTrustedIpcSender,
+  parseIpc,
   type SendToRendererViews,
 } from "./common";
 import type { WindowState } from "../window";
@@ -34,6 +35,9 @@ import {
   uninstallKit,
 } from "../automation/kit-registry";
 import { getScheduledKitIds } from "../automation/scheduler";
+
+const KitIdSchema = z.string().min(1);
+const OriginSchema = z.string().min(1);
 
 export function registerSystemHandlers(
   windowState: WindowState,
@@ -68,8 +72,7 @@ export function registerSystemHandlers(
 
   ipcMain.handle(Channels.AUTOMATION_UNINSTALL, (event, id: unknown) => {
     assertTrustedIpcSender(event);
-    assertString(id, "id");
-    return uninstallKit(id, getScheduledKitIds());
+    return uninstallKit(parseIpc(KitIdSchema, id, "id"), getScheduledKitIds());
   });
 
   ipcMain.handle(Channels.CLEAR_BROWSING_DATA, async (event, options: ClearDataOptions) => {
@@ -125,7 +128,7 @@ export function registerSystemHandlers(
   });
   ipcMain.handle(Channels.PERMISSIONS_CLEAR_ORIGIN, (event, origin: string) => {
     assertTrustedIpcSender(event);
-    clearPermissionsForOrigin(origin);
+    clearPermissionsForOrigin(parseIpc(OriginSchema, origin, "origin"));
     return true;
   });
 

@@ -1,4 +1,5 @@
 import { ipcMain } from "electron";
+import { z } from "zod";
 import { Channels } from "../../shared/channels";
 import {
   getRendererSettings,
@@ -12,14 +13,18 @@ import { createProvider } from "../ai/provider";
 import { regenerateMcpAuthToken, startMcpServer, stopMcpServer } from "../mcp/server";
 import { submitFeedback } from "../support/feedback";
 import {
-  assertString,
   assertTrustedIpcSender,
+  parseIpc,
   type SendToRendererViews,
 } from "./common";
 import type { VesselSettings, ApprovalMode } from "../../shared/types";
 import type { AgentRuntime } from "../agent/runtime";
 import type { TabManager } from "../tabs/tab-manager";
 import type { ResearchOrchestrator } from "../agent/research/orchestrator";
+
+const SettingsKeySchema = z.string().refine((k) => SETTABLE_KEYS.has(k), {
+  message: "Unknown setting key",
+});
 
 export function registerSettingsHandlers(
   tabManager: TabManager,
@@ -71,18 +76,13 @@ export function registerSettingsHandlers(
 
   ipcMain.handle(Channels.SUPPORT_SUBMIT_FEEDBACK, async (event, email: string, message: string) => {
     assertTrustedIpcSender(event);
-    assertString(email, "email");
-    assertString(message, "message");
     return submitFeedback({ email, message, source: "settings_account" });
   });
 
   ipcMain.handle(Channels.SETTINGS_SET, async (event, key: string, value: unknown) => {
     assertTrustedIpcSender(event);
-    assertString(key, "key");
-    if (!SETTABLE_KEYS.has(key)) {
-      throw new Error(`Unknown setting key: ${key}`);
-    }
-    const settingsKey = key as keyof VesselSettings;
+    const validatedKey = parseIpc(SettingsKeySchema, key, "key");
+    const settingsKey = validatedKey as keyof VesselSettings;
     return applySettingChange(settingsKey, value as VesselSettings[typeof settingsKey]);
   });
 
