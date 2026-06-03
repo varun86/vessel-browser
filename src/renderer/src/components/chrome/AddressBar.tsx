@@ -26,7 +26,7 @@ import {
   SEARCH_ENGINE_PRESETS,
   type SearchEngineId,
 } from "../../../../shared/types";
-import { Trash2 } from "lucide-solid";
+import { Trash2, X } from "lucide-solid";
 import {
   getAgentPresence,
   getLatestAgentStatusMessage,
@@ -56,6 +56,9 @@ const AddressBar: Component<{
   const [searchEngine, setSearchEngine] = createSignal<SearchEngineId>("duckduckgo");
   const [showSecurityPopup, setShowSecurityPopup] = createSignal(false);
   const [hasEditedAddress, setHasEditedAddress] = createSignal(false);
+  const [dismissedAgentStatusKey, setDismissedAgentStatusKey] = createSignal<
+    string | null
+  >(null);
   const now = useNow();
   let inputRef: HTMLInputElement | undefined;
   let addressBlurTimer: ReturnType<typeof setTimeout> | null = null;
@@ -78,6 +81,21 @@ const AddressBar: Component<{
   const agentStatusMessage = createMemo(() =>
     getLatestAgentStatusMessage(runtimeState(), now()),
   );
+  const agentStatusKey = createMemo(() => {
+    const message = agentStatusMessage();
+    if (!message) return null;
+    return `${agentPresence()}:${message}`;
+  });
+  const showAgentStatusBadge = createMemo(() => {
+    const key = agentStatusKey();
+    return !!key && dismissedAgentStatusKey() !== key;
+  });
+
+  createEffect(() => {
+    if (!agentStatusKey()) {
+      setDismissedAgentStatusKey(null);
+    }
+  });
 
   const pendingApprovalCount = createMemo(
     () => runtimeState().supervisor.pendingApprovals.length,
@@ -555,27 +573,29 @@ const AddressBar: Component<{
           </div>
         </Show>
 
-        <Show when={!isPrivateWindow}>
+        <Show when={!isPrivateWindow && showAgentStatusBadge()}>
           <div
             class={`agent-status-badge ${agentPresence()}`}
             title={
-              agentStatusMessage() ||
-              (agentPresence() === "active"
-                ? "Agent is actively using the browser"
-                : agentPresence() === "recent"
-                  ? "Agent is connected"
-                  : "No agent connection detected")
+              agentStatusMessage() || "Agent is using the browser"
             }
           >
             <span class="agent-status-dot" aria-hidden="true" />
             <span class="agent-status-text">
-              {agentStatusMessage() ||
-                (agentPresence() === "active"
-                  ? "Agent Active"
-                  : agentPresence() === "recent"
-                    ? "Agent Connected"
-                    : "Agent Offline")}
+              {agentStatusMessage()}
             </span>
+            <button
+              type="button"
+              class="agent-status-dismiss"
+              onClick={(event) => {
+                event.stopPropagation();
+                setDismissedAgentStatusKey(agentStatusKey());
+              }}
+              aria-label="Dismiss agent status"
+              title="Dismiss"
+            >
+              <X size={12} />
+            </button>
           </div>
         </Show>
 
