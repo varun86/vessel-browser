@@ -818,6 +818,28 @@ async function buildCartSuccessSuffix(
   return `\n${overlayHint}${actionsSuffix}${cartSummary}`;
 }
 
+async function followHrefFromClickResult(
+  wc: WebContents,
+  beforeUrl: string,
+  result: unknown,
+  logMessage: string,
+): Promise<string | null> {
+  const hrefMatch =
+    typeof result === "string" ? result.match(/\nhref: (https?:\/\/\S+)/) : null;
+  if (!hrefMatch) return null;
+
+  try {
+    await loadPermittedUrl(wc, hrefMatch[1]);
+    await waitForLoad(wc, 8000);
+    const hrefUrl = wc.getURL();
+    if (hrefUrl !== beforeUrl) return `${result.split("\n")[0]} -> ${hrefUrl}`;
+  } catch (err) {
+    logger.warn(logMessage, err);
+  }
+
+  return null;
+}
+
 export async function clickResolvedSelector(
   wc: WebContents,
   selector: string,
@@ -868,17 +890,13 @@ export async function clickResolvedSelector(
       return `${result}${await buildCartSuccessSuffix(wc, beforeUrl, idxOverlay)}`;
     }
     if (!idxOverlay) {
-      const hrefMatch = typeof result === "string"
-        ? result.match(/\nhref: (https?:\/\/\S+)/)
-        : null;
-      if (hrefMatch) {
-        try {
-          await loadPermittedUrl(wc, hrefMatch[1]);
-          await waitForLoad(wc, 8000);
-          const hrefUrl = wc.getURL();
-          if (hrefUrl !== beforeUrl) return `${result.split("\n")[0]} -> ${hrefUrl}`;
-        } catch {}
-      }
+      const hrefFallback = await followHrefFromClickResult(
+        wc,
+        beforeUrl,
+        result,
+        "Failed to follow href fallback after click:",
+      );
+      if (hrefFallback) return hrefFallback;
     }
     return idxOverlay
       ? `${result}\n${idxOverlay}`
@@ -942,17 +960,13 @@ export async function clickResolvedSelector(
       return `${result}${await buildCartSuccessSuffix(wc, beforeUrl, shadowOverlay)}`;
     }
     if (!shadowOverlay) {
-      const hrefMatch = typeof result === "string"
-        ? result.match(/\nhref: (https?:\/\/\S+)/)
-        : null;
-      if (hrefMatch) {
-        try {
-          await loadPermittedUrl(wc, hrefMatch[1]);
-          await waitForLoad(wc, 8000);
-          const hrefUrl = wc.getURL();
-          if (hrefUrl !== beforeUrl) return `${result.split("\n")[0]} -> ${hrefUrl}`;
-        } catch {}
-      }
+      const hrefFallback = await followHrefFromClickResult(
+        wc,
+        beforeUrl,
+        result,
+        "Failed to follow href fallback after shadow click:",
+      );
+      if (hrefFallback) return hrefFallback;
     }
     return shadowOverlay
       ? `${result}\n${shadowOverlay}`

@@ -51,7 +51,8 @@ export function getInstalledKits(): AutomationKit[] {
   let files: string[];
   try {
     files = fs.readdirSync(dir).filter((f) => f.endsWith(".kit.json"));
-  } catch {
+  } catch (err) {
+    logger.warn("Failed to read kit directory:", err);
     return [];
   }
 
@@ -86,14 +87,16 @@ export async function installKitFromFile(): Promise<Result<{ kit: AutomationKit 
   let raw: string;
   try {
     raw = fs.readFileSync(filePaths[0], "utf-8");
-  } catch {
+  } catch (err) {
+    logger.warn("Failed to read selected kit file:", err);
     return errorResult("Could not read the selected file.");
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch {
+  } catch (err) {
+    logger.warn("Selected kit file is not valid JSON:", err);
     return errorResult("File is not valid JSON.");
   }
 
@@ -116,7 +119,8 @@ export async function installKitFromFile(): Promise<Result<{ kit: AutomationKit 
   }
   try {
     fs.writeFileSync(dest, JSON.stringify(parsed, null, 2), "utf-8");
-  } catch {
+  } catch (err) {
+    logger.warn("Failed to save kit file:", err);
     return errorResult("Failed to save the kit file.");
   }
 
@@ -149,7 +153,8 @@ export function uninstallKit(
   try {
     fs.unlinkSync(target);
     return okResult();
-  } catch {
+  } catch (err) {
+    logger.warn("Failed to remove kit file:", err);
     return errorResult("Failed to remove the kit file.");
   }
 }
