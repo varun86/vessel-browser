@@ -47,7 +47,7 @@ function looksLikeCorrectOption(value?: string): boolean | undefined {
 
 let elementIndex = 0;
 const elementSelectors: Record<number, string> = {};
-let indexedElements = new WeakMap<Element, number>();
+const indexedElements = new WeakMap<Element, number>();
 // Direct element references for shadow DOM support — CSS selectors can't cross shadow boundaries
 const indexedElementRefs: Record<number, Element> = {};
 let activeOverlays: OverlayCandidate[] = [];

@@ -421,7 +421,6 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
     UNSORTED_FOLDER.id,
   ]);
   const [actionsExpanded, setActionsExpanded] = createSignal(false);
-  const [checkpointsExpanded, setCheckpointsExpanded] = createSignal(false);
   const [isDragging, setIsDragging] = createSignal(false);
   const now = useNow();
   let messagesContainerRef: HTMLDivElement | undefined;

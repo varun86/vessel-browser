@@ -36,6 +36,7 @@ export interface TabStateChangeMeta {
 
 function sanitizeFilename(title: string, ext: string): string {
   const clean = title
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
