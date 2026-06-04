@@ -1313,9 +1313,9 @@ const Settings: Component = () => {
           width: 14px;
           height: 14px;
           border-radius: 7px;
-          background: #fff;
+          background: var(--bg-primary);
           transition: transform var(--duration-fast);
-          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+          box-shadow: 0 1px 3px var(--shadow-color);
         }
         .toggle-switch.on .toggle-switch-thumb {
           transform: translateX(16px);
@@ -1327,10 +1327,10 @@ const Settings: Component = () => {
           line-height: 1.5;
         }
         .settings-status.success {
-          color: var(--status-success, #52c41a);
+          color: var(--status-success);
         }
         .settings-status.error {
-          color: var(--status-error, #f43f5e);
+          color: var(--status-error);
         }
         .settings-actions {
           display: flex;
@@ -1470,7 +1470,7 @@ const Settings: Component = () => {
           font-size: 11px;
           font-weight: 600;
           color: var(--button-primary-fg);
-          background: var(--status-success, #52c41a);
+          background: var(--status-success);
           padding: 2px 10px;
           border-radius: 4px;
           margin-bottom: 10px;
