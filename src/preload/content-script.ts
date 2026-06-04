@@ -7,6 +7,7 @@ import {
   generateStableSelector,
   escapeSelectorValue,
 } from "../shared/dom/selectors";
+import { createLogger } from "../shared/logger";
 import type {
   SelectOption,
   InteractiveElement,
@@ -16,6 +17,8 @@ import type {
   PageOverlay,
   PageContent,
 } from "../shared/types";
+
+const logger = createLogger("ContentScript");
 
 interface OverlayCandidate extends PageOverlay {
   element: HTMLElement;
@@ -1897,7 +1900,7 @@ function vesselExtractContent(): PageContent {
     const article = reader.parse();
     return extractStructuredContent(article || undefined);
   } catch (error) {
-    console.error("Vessel content extraction error:", error);
+    logger.error("Vessel content extraction error:", error);
     return extractStructuredContent();
   }
 }
