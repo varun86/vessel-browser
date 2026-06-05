@@ -336,20 +336,23 @@ app.whenReady().then(bootstrap).catch((error) => {
 });
 
   app.on("window-all-closed", () => {
-  globalShortcut.unregisterAll();
-  stopTelemetry();
-  stopBackgroundRevalidation();
-  void Promise.all([
-    runtime?.flushPersist() ?? Promise.resolve(),
-    bookmarkManager.flushPersist(),
-    historyManager.flushPersist(),
-    highlightsManager.flushPersist(),
-    autofillManager.flushPersist(),
-    pageSnapshots.flushPersist(),
-    flushSettingsPersist(),
-  ]).finally(() => {
-    void stopMcpServer().finally(() => {
-      app.quit();
+    globalShortcut.unregisterAll();
+    stopTelemetry();
+    stopBackgroundRevalidation();
+    // Dispose runtime and tab manager before persisting to free listeners and memory
+    runtime?.dispose();
+    windowState?.tabManager.dispose();
+    void Promise.all([
+      runtime?.flushPersist() ?? Promise.resolve(),
+      bookmarkManager.flushPersist(),
+      historyManager.flushPersist(),
+      highlightsManager.flushPersist(),
+      autofillManager.flushPersist(),
+      pageSnapshots.flushPersist(),
+      flushSettingsPersist(),
+    ]).finally(() => {
+      void stopMcpServer().finally(() => {
+        app.quit();
+      });
     });
   });
-});

@@ -800,7 +800,7 @@ export class Tab {
     return this.view.webContents.id;
   }
 
-  destroy(): void {
+  dispose(): void {
     this.setHighlightMode(false);
     this.view.webContents.close();
   }

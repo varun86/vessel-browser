@@ -149,10 +149,11 @@ export class AgentRuntime {
   private updateListener: ((state: AgentRuntimeState) => void) | null = null;
   private pendingResolvers = new Map<string, (approved: boolean) => void>();
   private undoSnapshots: UndoSnapshot[] = [];
+  private mcpUnsubscribe: (() => void) | null = null;
 
   constructor(private readonly tabManager: TabManager) {
     this.state = this.loadPersistedState();
-    onMcpStatusChange(() => this.emit());
+    this.mcpUnsubscribe = onMcpStatusChange(() => this.emit());
   }
 
   setUpdateListener(
@@ -162,6 +163,30 @@ export class AgentRuntime {
     if (listener) {
       listener(this.getState());
     }
+  }
+
+  /**
+   * Release all resources, listeners, and pending promises.
+   * Call when the window is closing to prevent memory leaks.
+   */
+  dispose(): void {
+    this.mcpUnsubscribe?.();
+    this.mcpUnsubscribe = null;
+
+    // Resolve any pending approvals to unblock waiting code
+    for (const [id, resolve] of this.pendingResolvers) {
+      resolve(false);
+      this.pendingResolvers.delete(id);
+    }
+
+    // Clear all transient state to release memory
+    this.undoSnapshots = [];
+    this.state.actions = [];
+    this.state.transcript = [];
+    this.state.supervisor.pendingApprovals = [];
+    this.state.flowState = null;
+    this.state.taskTracker = null;
+    this.updateListener = null;
   }
 
   getState(): AgentRuntimeState {
