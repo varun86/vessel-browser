@@ -17,6 +17,9 @@ import {
   loadJsonFile,
 } from "../persistence/json-file";
 import { normalizeBookmarkMetadataUpdate } from "./metadata";
+import { createLogger } from "../../shared/logger";
+
+const logger = createLogger("BookmarkManager");
 
 export const UNSORTED_ID = "unsorted";
 export const ARCHIVE_FOLDER_NAME = "Archive";
@@ -778,7 +781,8 @@ export function importBookmarksFromJson(content: string): ImportResult {
       save();
       emit();
     }
-  } catch {
+  } catch (err) {
+    logger.warn("Failed to import bookmarks from JSON:", err);
     errors++;
   }
   return { imported, skipped, errors };
