@@ -57,6 +57,7 @@ docs/superpowers/specs/2026-04-01-premium-conversion-optimization-design.md
 # Force-add intentional new top-level tests with: git add -f tests/name.test.ts
 tests/*.test.ts
 !tests/ad-blocking-rules.test.ts
+!tests/agent-runtime.test.ts
 !tests/agent-activity.test.ts
 !tests/ai-activity.test.ts
 !tests/ai-busy-handshake.test.ts
@@ -72,6 +73,7 @@ tests/*.test.ts
 !tests/overlay-context.test.ts
 !tests/page-access-issues.test.ts
 !tests/page-diff-display.test.ts
+!tests/prompt-cache.test.ts
 !tests/provider-openai-tools.test.ts
 !tests/results-only-context.test.ts
 !tests/research-clarification-tool.test.ts
