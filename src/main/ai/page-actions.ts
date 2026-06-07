@@ -43,6 +43,7 @@ import {
   coerceStringArray,
   normalizeLooseString,
 } from "../tools/input-coercion";
+import { TOOL_DEFINITIONS } from "../tools/definitions";
 import {
   buildScopedContext,
   buildStructuredContext,
@@ -1682,7 +1683,7 @@ async function tryDismissConsentIframe(wc: WebContents): Promise<string | null> 
                     return 'Clicked iframe consent button: ' + text.slice(0, 60);
                   }
                 }
-              } catch(e) {}
+              } catch(e) { /* consent element removed or inaccessible */ }
             }
             // Text-match fallback on all buttons
             var buttons = document.querySelectorAll('button, [role="button"], a.message-component');
@@ -3286,60 +3287,7 @@ async function getPostActionState(
 }
 
 /** All known tool names — used to detect concatenated tool calls from models */
-const KNOWN_TOOLS = new Set([
-  "current_tab",
-  "list_tabs",
-  "switch_tab",
-  "create_tab",
-  "navigate",
-  "go_back",
-  "go_forward",
-  "reload",
-  "click",
-  "inspect_element",
-  "type_text",
-  "select_option",
-  "submit_form",
-  "press_key",
-  "scroll",
-  "hover",
-  "focus",
-  "set_ad_blocking",
-  "dismiss_popup",
-  "clear_overlays",
-  "read_page",
-  "screenshot",
-  "wait_for",
-  "create_checkpoint",
-  "restore_checkpoint",
-  "save_session",
-  "load_session",
-  "list_sessions",
-  "delete_session",
-  "list_bookmarks",
-  "search_bookmarks",
-  "create_bookmark_folder",
-  "save_bookmark",
-  "organize_bookmark",
-  "archive_bookmark",
-  "open_bookmark",
-  "highlight",
-  "clear_highlights",
-  "flow_start",
-  "flow_advance",
-  "flow_status",
-  "flow_end",
-  "suggest",
-  "fill_form",
-  "login",
-  "search",
-  "paginate",
-  "accept_cookies",
-  "extract_table",
-  "scroll_to_element",
-  "metrics",
-  "wait_for_navigation",
-]);
+const KNOWN_TOOLS = new Set(TOOL_DEFINITIONS.map((d) => d.name));
 
 export async function executeAction(
   name: string,

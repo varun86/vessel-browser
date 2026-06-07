@@ -32,10 +32,13 @@ export async function requestConsent(
     return { approved: true, trustForSession: true };
   }
 
-  const focusedWindow = BrowserWindow.getFocusedWindow();
+  const parentWindow = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  if (!parentWindow) {
+    return { approved: false, trustForSession: false };
+  }
 
   const { response } = await dialog.showMessageBox(
-    focusedWindow ?? (BrowserWindow.getAllWindows()[0] || null)!,
+    parentWindow,
     {
       type: "question",
       title: "Agent Credential Access",

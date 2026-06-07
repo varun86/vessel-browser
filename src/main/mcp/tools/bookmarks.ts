@@ -694,7 +694,8 @@ export function registerBookmarkTools(
             return `Opened bookmark "${bookmark.title}" in new tab ${createdId}`;
           }
 
-          const activeId = tabManager.getActiveTabId()!;
+          const activeId = tabManager.getActiveTabId();
+          if (!activeId) return "No active tab to open bookmark in";
           const activeTab = tabManager.getActiveTab();
           tabManager.navigateTab(activeId, bookmark.url);
           if (activeTab) {

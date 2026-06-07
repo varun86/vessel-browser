@@ -65,6 +65,7 @@ const PRELOAD_EXTRACTION_SCRIPT = String.raw`
         }
       }
     } catch (_error) {
+      // Structured extraction unavailable, fall through to direct extraction
     }
     return null;
   })()
@@ -705,9 +706,9 @@ const DIRECT_EXTRACTION_SCRIPT = String.raw`
           } else if (parsed && typeof parsed === "object") {
             jsonLd.push(parsed);
           }
-        } catch (_e) {}
+        } catch (_e) { /* skip malformed JSON-LD block */ }
       });
-    } catch (_e) {}
+    } catch (_e) { /* no JSON-LD scripts found or querySelectorAll failed */ }
 
     // Extract meta tags as fallback
     var metaTags = {};
@@ -720,9 +721,7 @@ const DIRECT_EXTRACTION_SCRIPT = String.raw`
       });
       var canonical = document.querySelector('link[rel="canonical"]');
       if (canonical && canonical.getAttribute("href")) metaTags["canonical"] = canonical.getAttribute("href");
-    } catch (_e) {}
-
-    return {
+    } catch (_e) { /* meta tag extraction failed — non-critical */ }
       title: document.title,
       content: getCleanBodyText(),
       htmlContent: "",

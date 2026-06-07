@@ -772,7 +772,7 @@ export class Tab {
                     range.insertNode(mark);
                   }
                 }
-              } catch(e) {}
+              } catch(e) { /* element may have been removed since selection, skip */ }
               sel.removeAllRanges();
               // Notify main process for persistence
               window.__vessel.notifyHighlightSelection(text);

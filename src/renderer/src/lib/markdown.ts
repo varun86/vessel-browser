@@ -1,13 +1,5 @@
 import DOMPurify from "dompurify";
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+import { escapeHtml } from "../../../shared/html-escape";
 
 function sanitizeUrl(url: string): string | null {
   const trimmed = url.trim();

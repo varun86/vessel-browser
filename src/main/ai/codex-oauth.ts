@@ -1,5 +1,6 @@
 import type { CodexOAuthTokens, CodexAuthStatus } from "../../shared/types";
 import { createLogger } from "../../shared/logger";
+import { escapeHtml } from "../../shared/html-escape";
 import {
   createLocalPkceOAuthFlow,
   type PkceCodes,
@@ -236,14 +237,6 @@ async function refreshAccessToken(
   };
 
   return refreshedTokens;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 const codexOAuth = createLocalPkceOAuthFlow<CodexOAuthTokens>({
