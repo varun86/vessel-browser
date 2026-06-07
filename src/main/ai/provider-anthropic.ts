@@ -7,6 +7,11 @@ import type { AgentToolProfile } from "./tool-profile";
 import { isClickReadLoop } from "./tool-guardrails";
 import { AGENT_STREAM_IDLE_TIMEOUT_MS } from "../config/timing";
 import { TERMINAL_TOOL_RESULT } from "./tool-control";
+import {
+  anthropicCachedSystem,
+  anthropicCachedTools,
+  logAnthropicPromptCacheUsage,
+} from "./prompt-cache";
 
 const ANTHROPIC_MAX_TOKENS = 4096;
 
@@ -77,7 +82,7 @@ export class AnthropicProvider implements AIProvider {
         {
           model: this.model,
           max_tokens: ANTHROPIC_MAX_TOKENS,
-          system: systemPrompt,
+          system: anthropicCachedSystem(systemPrompt),
           messages,
           ...(thinking ? { thinking } : {}),
         },
@@ -85,6 +90,12 @@ export class AnthropicProvider implements AIProvider {
       );
 
       for await (const event of stream) {
+        if (event.type === "message_start") {
+          logAnthropicPromptCacheUsage(event.message.usage, {
+            model: this.model,
+            mode: "chat",
+          });
+        }
         if (
           event.type === "content_block_delta" &&
           event.delta.type === "text_delta"
@@ -130,9 +141,9 @@ export class AnthropicProvider implements AIProvider {
           {
             model: this.model,
             max_tokens: ANTHROPIC_MAX_TOKENS,
-            system: systemPrompt,
+            system: anthropicCachedSystem(systemPrompt),
             messages,
-            tools,
+            tools: anthropicCachedTools(tools),
             ...(thinking ? { thinking } : {}),
           },
           { signal: this.abortController.signal },
@@ -166,6 +177,12 @@ export class AnthropicProvider implements AIProvider {
         try {
           for await (const event of stream) {
             resetIdleTimer();
+            if (event.type === "message_start") {
+              logAnthropicPromptCacheUsage(event.message.usage, {
+                model: this.model,
+                mode: "agent",
+              });
+            }
             if (event.type === "content_block_start") {
               if (event.content_block.type === "tool_use") {
                 currentToolUse = {

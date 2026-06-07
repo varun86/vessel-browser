@@ -171,7 +171,7 @@ export class TabManager {
 
     destroySession(id);
     this.window.contentView.removeChildView(tab.view);
-    tab.destroy();
+    tab.dispose();
     this.tabs.delete(id);
     this.order = this.order.filter((tid) => tid !== id);
     this.removeGroupIfEmpty(groupId);
@@ -503,7 +503,7 @@ export class TabManager {
       if (!tab) continue;
       destroySession(id);
       this.window.contentView.removeChildView(tab.view);
-      tab.destroy();
+      tab.dispose();
     }
 
     this.tabs.clear();
@@ -514,6 +514,32 @@ export class TabManager {
   }
 
   private lastReapply = new Map<number, { url: string; at: number }>();
+
+  /**
+   * Clean up all tabs, event listeners, and internal state.
+   * Call when the window is closing or when the TabManager is being replaced
+   * (e.g. secondary / private windows).
+   */
+  dispose(): void {
+    for (const id of [...this.order]) {
+      const tab = this.tabs.get(id);
+      if (!tab) continue;
+      destroySession(id);
+      this.window.contentView.removeChildView(tab.view);
+      tab.dispose();
+    }
+
+    this.tabs.clear();
+    this.order = [];
+    this.tabGroups.clear();
+    this.activeTabId = null;
+    this.closedTabs = [];
+    this.lastReapply.clear();
+    this.highlightCaptureCallback = null;
+    this.pageLoadCallback = null;
+    this.securityStateCallback = null;
+    this.lastSessionSignature = "";
+  }
 
   private reapplyHighlights(url: string, wc: WebContents): void {
     const wcId = wc.id;

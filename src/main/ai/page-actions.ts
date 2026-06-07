@@ -1683,7 +1683,9 @@ async function tryDismissConsentIframe(wc: WebContents): Promise<string | null> 
                     return 'Clicked iframe consent button: ' + text.slice(0, 60);
                   }
                 }
-              } catch(e) { /* consent element removed or inaccessible */ }
+              } catch {
+                // Swallow — selector may be invalid or cross-origin frame may block access
+              }
             }
             // Text-match fallback on all buttons
             var buttons = document.querySelectorAll('button, [role="button"], a.message-component');

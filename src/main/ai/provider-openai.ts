@@ -24,6 +24,10 @@ import {
   stableToolSignature,
   unsupportedToolHint,
 } from './provider-openai-tools';
+import {
+  logOpenAIPromptCacheUsage,
+  openAIPromptCacheOptions,
+} from './prompt-cache';
 
 const logger = createLogger("OpenAIProvider");
 
@@ -535,12 +539,22 @@ export class OpenAICompatProvider implements AIProvider {
           max_tokens: 4096,
           stream: true,
           messages,
+          ...openAIPromptCacheOptions({
+            providerId: this.providerId,
+            model: this.model,
+            mode: "chat",
+            profile: this.agentToolProfile,
+          }),
           ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         },
         { signal: this.abortController.signal },
       );
 
       for await (const chunk of stream) {
+        logOpenAIPromptCacheUsage(chunk.usage, {
+          model: this.model,
+          mode: "chat",
+        });
         const choice = chunk.choices[0];
         if (!choice) continue;
         const delta = choice.delta;
@@ -626,12 +640,22 @@ export class OpenAICompatProvider implements AIProvider {
             tools: openAITools,
             tool_choice: 'auto',
             temperature: agentTemperatureForProfile(this.agentToolProfile),
+            ...openAIPromptCacheOptions({
+              providerId: this.providerId,
+              model: this.model,
+              mode: "agent",
+              profile: this.agentToolProfile,
+            }),
             ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
           },
           { signal: this.abortController.signal },
         );
 
         for await (const chunk of stream) {
+          logOpenAIPromptCacheUsage(chunk.usage, {
+            model: this.model,
+            mode: "agent",
+          });
           const choice = chunk.choices[0];
           if (!choice) continue;
 

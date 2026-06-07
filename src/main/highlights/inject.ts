@@ -134,6 +134,8 @@ function applyTextRangeMatch(match, solidColor, bgColor, fullText) {
       var mark = markTextSegment(segments[i], solidColor, bgColor, fullText);
       if (mark) marks.unshift(mark);
     } catch (_e) { /* text segment couldn't be marked — it may overlap other highlights */ }
+  }
+  return marks;
 }
 `;
 

@@ -722,6 +722,7 @@ const DIRECT_EXTRACTION_SCRIPT = String.raw`
       var canonical = document.querySelector('link[rel="canonical"]');
       if (canonical && canonical.getAttribute("href")) metaTags["canonical"] = canonical.getAttribute("href");
     } catch (_e) { /* meta tag extraction failed — non-critical */ }
+    return {
       title: document.title,
       content: getCleanBodyText(),
       htmlContent: "",
