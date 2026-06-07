@@ -60,7 +60,7 @@ async function withTab(
     } catch {
       // ignore cleanup errors
     }
-    tab.destroy();
+    tab.dispose();
     window.destroy();
   }
 }

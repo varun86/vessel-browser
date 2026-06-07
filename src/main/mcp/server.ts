@@ -501,7 +501,8 @@ function registerTools(
         );
       }
       return withAction(runtime, tabManager, "navigate", { url }, async () => {
-        const id = tabManager.getActiveTabId()!;
+        const id = tabManager.getActiveTabId();
+        if (!id) return asNoActiveTabResponse();
         const navError = tabManager.navigateTab(id, url, postBody);
         if (navError) return navError;
         const { httpStatus } = await waitForLoadWithStatus(
@@ -673,7 +674,9 @@ function registerTools(
           return "No previous page in history";
         }
         const beforeUrl = tab.view.webContents.getURL();
-        tabManager.goBack(tabManager.getActiveTabId()!);
+        const backId = tabManager.getActiveTabId();
+        if (!backId) return asNoActiveTabResponse();
+        tabManager.goBack(backId);
         await waitForLoad(tab.view.webContents);
         const afterUrl = tab.view.webContents.getURL();
         return afterUrl !== beforeUrl
@@ -697,7 +700,9 @@ function registerTools(
           return "No forward page in history";
         }
         const beforeUrl = tab.view.webContents.getURL();
-        tabManager.goForward(tabManager.getActiveTabId()!);
+        const forwardId = tabManager.getActiveTabId();
+        if (!forwardId) return asNoActiveTabResponse();
+        tabManager.goForward(forwardId);
         await waitForLoad(tab.view.webContents);
         const afterUrl = tab.view.webContents.getURL();
         return afterUrl !== beforeUrl
@@ -717,7 +722,9 @@ function registerTools(
       const tab = tabManager.getActiveTab();
       if (!tab) return asNoActiveTabResponse();
       return withAction(runtime, tabManager, "reload", {}, async () => {
-        tabManager.reloadTab(tabManager.getActiveTabId()!);
+        const reloadId = tabManager.getActiveTabId();
+        if (!reloadId) return asNoActiveTabResponse();
+        tabManager.reloadTab(reloadId);
         await waitForLoad(tab.view.webContents);
         return `Reloaded ${tab.view.webContents.getURL()}`;
       });
@@ -2347,7 +2354,8 @@ function registerTools(
 
           // Step 1: Navigate if URL provided
           if (url) {
-            const id = tabManager.getActiveTabId()!;
+            const id = tabManager.getActiveTabId();
+            if (!id) return asNoActiveTabResponse();
             tabManager.navigateTab(id, url);
             await waitForLoad(wc);
             steps.push(`Navigated to ${wc.getURL()}`);

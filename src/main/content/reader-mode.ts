@@ -1,4 +1,5 @@
 import type { PageContent } from '../../shared/types';
+import { escapeHtml } from '../../shared/html-escape';
 
 export function generateReaderHTML(page: PageContent): string {
   const escapedTitle = escapeHtml(page.title);
@@ -99,13 +100,4 @@ function renderReaderContent(page: PageContent): string {
     .filter(Boolean)
     .map((block) => `<p>${escapeHtml(block).replace(/\n/g, "<br>")}</p>`)
     .join("\n");
-}
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }

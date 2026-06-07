@@ -133,7 +133,7 @@ function applyTextRangeMatch(match, solidColor, bgColor, fullText) {
     try {
       var mark = markTextSegment(segments[i], solidColor, bgColor, fullText);
       if (mark) marks.unshift(mark);
-    } catch (_e) {}
+    } catch (_e) { /* text segment couldn't be marked — it may overlap other highlights */ }
   }
   return marks;
 }
@@ -518,7 +518,7 @@ export async function highlightBatchOnPage(
               el.style.setProperty('outline-color', c.solid, 'important');
               el.style.setProperty('box-shadow', '0 0 8px ' + c.glow, 'important');
             }
-          } catch (_e) {}
+          } catch (_e) { /* selector may not exist on current page */ }
         }
       }
     })()
