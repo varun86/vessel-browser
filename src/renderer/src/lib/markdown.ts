@@ -386,7 +386,10 @@ export function renderMarkdown(source: string): string {
   );
 
   if (typeof DOMPurify?.sanitize !== "function") {
-    return output;
+    // DOMPurify is unavailable — strip all HTML tags and return plain text.
+    // Never return unsanitized HTML since this is rendered via innerHTML.
+    console.warn("[markdown] DOMPurify not available; stripping HTML as fallback");
+    return output.replace(/<[^>]+>/g, "");
   }
 
   return DOMPurify.sanitize(output, {
