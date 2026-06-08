@@ -60,9 +60,9 @@ export function registerSystemHandlers(
     return clamped;
   });
 
-  ipcMain.handle(Channels.AUTOMATION_GET_INSTALLED, (event) => {
+  ipcMain.handle(Channels.AUTOMATION_GET_INSTALLED, async (event) => {
     assertTrustedIpcSender(event);
-    return getInstalledKits();
+    return await getInstalledKits();
   });
 
   ipcMain.handle(Channels.AUTOMATION_INSTALL_FROM_FILE, async (event) => {
@@ -70,9 +70,12 @@ export function registerSystemHandlers(
     return await installKitFromFile();
   });
 
-  ipcMain.handle(Channels.AUTOMATION_UNINSTALL, (event, id: unknown) => {
+  ipcMain.handle(Channels.AUTOMATION_UNINSTALL, async (event, id: unknown) => {
     assertTrustedIpcSender(event);
-    return uninstallKit(parseIpc(KitIdSchema, id, "id"), getScheduledKitIds());
+    return await uninstallKit(
+      parseIpc(KitIdSchema, id, "id"),
+      getScheduledKitIds(),
+    );
   });
 
   ipcMain.handle(Channels.CLEAR_BROWSING_DATA, async (event, options: ClearDataOptions) => {

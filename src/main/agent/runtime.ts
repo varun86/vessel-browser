@@ -630,6 +630,8 @@ export class AgentRuntime {
 
   private loadPersistedState(): AgentRuntimeState {
     try {
+      // Constructor-time load stays sync so AgentRuntime is usable immediately;
+      // hot-path writes are debounced and async in persistNow().
       const raw = fs.readFileSync(getRuntimeStatePath(), "utf-8");
       const parsed = JSON.parse(raw) as RuntimePersistenceShape;
       return sanitizePersistence(parsed);

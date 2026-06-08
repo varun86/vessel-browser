@@ -11,16 +11,23 @@ import { createLogger } from "../../shared/logger";
 import { errorResult, okResult, type Result } from "../../shared/result";
 
 const logger = createLogger("KitRegistry");
+const { access, mkdir, readFile, readdir, unlink, writeFile } = fs.promises;
 
 function getUserKitsDir(): string {
   return path.join(app.getPath("userData"), "kits");
 }
 
-function ensureKitsDir(): void {
-  const dir = getUserKitsDir();
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
   }
+}
+
+async function ensureKitsDir(): Promise<void> {
+  await mkdir(getUserKitsDir(), { recursive: true });
 }
 
 function getKitFilePath(id: string): string | null {
@@ -45,12 +52,12 @@ function isValidKit(value: unknown): value is AutomationKit {
   );
 }
 
-export function getInstalledKits(): AutomationKit[] {
-  ensureKitsDir();
+export async function getInstalledKits(): Promise<AutomationKit[]> {
+  await ensureKitsDir();
   const dir = getUserKitsDir();
   let files: string[];
   try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith(".kit.json"));
+    files = (await readdir(dir)).filter((f) => f.endsWith(".kit.json"));
   } catch (err) {
     logger.warn("Failed to read kit directory:", err);
     return [];
@@ -59,7 +66,7 @@ export function getInstalledKits(): AutomationKit[] {
   const kits: AutomationKit[] = [];
   for (const file of files) {
     try {
-      const raw = fs.readFileSync(path.join(dir, file), "utf-8");
+      const raw = await readFile(path.join(dir, file), "utf-8");
       const parsed: unknown = JSON.parse(raw);
       if (isValidKit(parsed)) {
         kits.push(parsed);
@@ -86,7 +93,7 @@ export async function installKitFromFile(): Promise<Result<{ kit: AutomationKit 
 
   let raw: string;
   try {
-    raw = fs.readFileSync(filePaths[0], "utf-8");
+    raw = await readFile(filePaths[0], "utf-8");
   } catch (err) {
     logger.warn("Failed to read selected kit file:", err);
     return errorResult("Could not read the selected file.");
@@ -112,13 +119,13 @@ export async function installKitFromFile(): Promise<Result<{ kit: AutomationKit 
     );
   }
 
-  ensureKitsDir();
+  await ensureKitsDir();
   const dest = getKitFilePath(parsed.id);
   if (!dest) {
     return errorResult("Kit id contains unsupported characters.");
   }
   try {
-    fs.writeFileSync(dest, JSON.stringify(parsed, null, 2), "utf-8");
+    await writeFile(dest, JSON.stringify(parsed, null, 2), "utf-8");
   } catch (err) {
     logger.warn("Failed to save kit file:", err);
     return errorResult("Failed to save the kit file.");
@@ -127,10 +134,10 @@ export async function installKitFromFile(): Promise<Result<{ kit: AutomationKit 
   return okResult({ kit: parsed });
 }
 
-export function uninstallKit(
+export async function uninstallKit(
   id: string,
   scheduledKitIds?: ReadonlySet<string>,
-): Result {
+): Promise<Result> {
   if (BUNDLED_KIT_IDS.has(id)) {
     return errorResult("Built-in kits cannot be removed.");
   }
@@ -141,17 +148,17 @@ export function uninstallKit(
     );
   }
 
-  ensureKitsDir();
+  await ensureKitsDir();
   const target = getKitFilePath(id);
   if (!target) {
     return errorResult("Kit id contains unsupported characters.");
   }
-  if (!fs.existsSync(target)) {
+  if (!(await pathExists(target))) {
     return errorResult("Kit not found.");
   }
 
   try {
-    fs.unlinkSync(target);
+    await unlink(target);
     return okResult();
   } catch (err) {
     logger.warn("Failed to remove kit file:", err);

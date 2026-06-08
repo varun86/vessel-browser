@@ -830,7 +830,7 @@ export function registerBookmarkTools(
           if (!bookmark) {
             return `Bookmark ${bookmark_id} not found`;
           }
-          const saved = linkBookmarkToMemory({
+          const saved = await linkBookmarkToMemory({
             bookmark,
             notePath: note_path,
             title,
