@@ -5,17 +5,16 @@ import type {
   HighlightsState,
   StoredHighlight,
 } from "../../shared/types";
+import { StoredHighlightSchema, parseArrayStateWithFallback } from "../../shared/persistence-schemas";
 import { PersistentState } from "../persistence/persistent-state";
+
+const HIGHLIGHTS_FALLBACK: HighlightsState = { highlights: [] };
 
 const store = new PersistentState<HighlightsState>({
   filename: "vessel-highlights.json",
-  fallback: { highlights: [] },
-  parse: (raw: unknown) => {
-    const parsed = raw as Partial<HighlightsState>;
-    return {
-      highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
-    };
-  },
+  fallback: HIGHLIGHTS_FALLBACK,
+  parse: (raw: unknown) =>
+    parseArrayStateWithFallback(StoredHighlightSchema, raw, "highlights", HIGHLIGHTS_FALLBACK, "highlights"),
   logLabel: "highlights",
   debounceMs: 250,
   resetOnSchedule: true,

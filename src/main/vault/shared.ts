@@ -239,8 +239,8 @@ export function createAuditLog<T extends Record<string, unknown>>(
           });
           fs.chmodSync(auditPath, 0o600);
         }
-      } catch {
-        // Non-critical — don't fail the operation
+      } catch (err) {
+        logger.warn("Failed to trim audit log:", err);
       }
     } catch (err) {
       logger.error("Failed to write audit log:", err);

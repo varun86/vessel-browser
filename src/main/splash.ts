@@ -175,8 +175,8 @@ export function createSplashWindow(): BrowserWindow {
     splash.once("closed", () => {
       try {
         fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch {
-        // Best-effort cleanup only.
+      } catch (err) {
+        logger.debug("Failed to clean up splash temp dir:", err);
       }
     });
     fs.writeFileSync(tmpPath, html, "utf-8");
