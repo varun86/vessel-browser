@@ -9,6 +9,7 @@ const DEFAULT_BOOKMARK_FOLDER = "Vessel/Bookmarks";
 const PAGE_CONTENT_LIMIT = 6000;
 const DEFAULT_LIST_LIMIT = 50;
 const DEFAULT_SEARCH_LIMIT = 20;
+const { access, mkdir, readFile, readdir, stat, writeFile } = fs.promises;
 
 export interface SavedMemoryNote {
   title: string;
@@ -145,13 +146,22 @@ function slugify(value: string): string {
   return normalized || "note";
 }
 
-function buildUniqueNotePath(dir: string, title: string): string {
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function buildUniqueNotePath(dir: string, title: string): Promise<string> {
   const datePrefix = new Date().toISOString().slice(0, 10);
   const slug = slugify(title);
   const base = `${datePrefix}-${slug}`;
   let candidate = `${base}.md`;
   let counter = 2;
-  while (fs.existsSync(path.join(dir, candidate))) {
+  while (await pathExists(path.join(dir, candidate))) {
     candidate = `${base}-${counter}.md`;
     counter += 1;
   }
@@ -223,32 +233,36 @@ function parseFrontmatter(content: string): {
   return { body, title: result.title, tags: result.tags };
 }
 
-function collectMarkdownFiles(dir: string): string[] {
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  const files: string[] = [];
+async function collectMarkdownFiles(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const nestedFiles = await Promise.all(
+    entries.map(async (entry) => {
+      const absolutePath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        return collectMarkdownFiles(absolutePath);
+      }
+      if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+        return [absolutePath];
+      }
+      return [];
+    }),
+  );
 
-  for (const entry of entries) {
-    const absolutePath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...collectMarkdownFiles(absolutePath));
-      continue;
-    }
-    if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
-      files.push(absolutePath);
-    }
-  }
-
-  return files;
+  return nestedFiles.flat();
 }
 
-function toSummary(absolutePath: string, vaultRoot: string): MemoryNoteSummary {
-  const stats = fs.statSync(absolutePath);
+async function toSummary(
+  absolutePath: string,
+  vaultRoot: string,
+  raw?: string,
+): Promise<MemoryNoteSummary> {
+  const stats = await stat(absolutePath);
   const relativePath = path
     .relative(vaultRoot, absolutePath)
     .split(path.sep)
     .join("/");
-  const raw = fs.readFileSync(absolutePath, "utf-8");
-  const parsed = parseFrontmatter(raw);
+  const noteContent = raw ?? (await readFile(absolutePath, "utf-8"));
+  const parsed = parseFrontmatter(noteContent);
   const headingMatch = parsed.body.match(/^#\s+(.+)$/m);
   const title =
     parsed.title ||
@@ -281,19 +295,19 @@ function renderBookmarkLinkBlock(bookmark: Bookmark, note?: string): string {
   return `${lines.join("\n")}\n`;
 }
 
-export function writeMemoryNote({
+export async function writeMemoryNote({
   title,
   body,
   folder,
   tags = [],
   frontmatter = {},
-}: WriteMemoryNoteInput): SavedMemoryNote {
+}: WriteMemoryNoteInput): Promise<SavedMemoryNote> {
   const vaultRoot = getVaultRoot();
   const relativeFolder = normalizeFolder(folder, DEFAULT_NOTE_FOLDER);
   const targetDir = path.join(vaultRoot, relativeFolder);
-  fs.mkdirSync(targetDir, { recursive: true });
+  await mkdir(targetDir, { recursive: true });
 
-  const absolutePath = buildUniqueNotePath(targetDir, title);
+  const absolutePath = await buildUniqueNotePath(targetDir, title);
   const relativePath = path.relative(vaultRoot, absolutePath);
   const content = [
     renderFrontmatter({
@@ -306,7 +320,7 @@ export function writeMemoryNote({
     "",
   ].join("\n");
 
-  fs.writeFileSync(absolutePath, content, "utf-8");
+  await writeFile(absolutePath, content, "utf-8");
 
   return {
     title,
@@ -315,30 +329,30 @@ export function writeMemoryNote({
   };
 }
 
-export function appendToMemoryNote({
+export async function appendToMemoryNote({
   notePath,
   content,
   heading,
-}: AppendMemoryNoteInput): SavedMemoryNote {
+}: AppendMemoryNoteInput): Promise<SavedMemoryNote> {
   const vaultRoot = getVaultRoot();
   const relativePath = normalizeNotePath(notePath);
   const absolutePath = assertInsideVault(
     path.join(vaultRoot, relativePath),
     vaultRoot,
   );
-  if (!fs.existsSync(absolutePath)) {
+  if (!(await pathExists(absolutePath))) {
     throw new Error(
       `Memory note not found: ${relativePath.split(path.sep).join("/")}`,
     );
   }
 
-  const current = fs.readFileSync(absolutePath, "utf-8").trimEnd();
+  const current = (await readFile(absolutePath, "utf-8")).trimEnd();
   const nextParts = [current, ""];
   if (heading?.trim()) {
     nextParts.push(`## ${heading.trim()}`, "");
   }
   nextParts.push(content.trim(), "");
-  fs.writeFileSync(absolutePath, nextParts.join("\n"), "utf-8");
+  await writeFile(absolutePath, nextParts.join("\n"), "utf-8");
 
   return {
     title: path.basename(absolutePath, ".md"),
@@ -347,32 +361,36 @@ export function appendToMemoryNote({
   };
 }
 
-export function listMemoryNotes({
+export async function listMemoryNotes({
   folder,
   limit = DEFAULT_LIST_LIMIT,
-}: ListMemoryNotesInput = {}): MemoryNoteSummary[] {
+}: ListMemoryNotesInput = {}): Promise<MemoryNoteSummary[]> {
   const vaultRoot = getVaultRoot();
   const relativeFolder = normalizeFolder(folder, "");
   const targetDir = relativeFolder
     ? path.join(vaultRoot, relativeFolder)
     : vaultRoot;
 
-  if (!fs.existsSync(targetDir)) {
+  if (!(await pathExists(targetDir))) {
     return [];
   }
 
-  return collectMarkdownFiles(targetDir)
-    .map((absolutePath) => toSummary(absolutePath, vaultRoot))
+  const notes = await Promise.all(
+    (await collectMarkdownFiles(targetDir)).map((absolutePath) =>
+      toSummary(absolutePath, vaultRoot),
+    ),
+  );
+  return notes
     .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))
     .slice(0, Math.max(1, limit));
 }
 
-export function searchMemoryNotes({
+export async function searchMemoryNotes({
   query,
   folder,
   tags = [],
   limit = DEFAULT_SEARCH_LIMIT,
-}: SearchMemoryNotesInput): MemoryNoteSummary[] {
+}: SearchMemoryNotesInput): Promise<MemoryNoteSummary[]> {
   const loweredQuery = query.trim().toLowerCase();
   if (!loweredQuery) {
     throw new Error("A non-empty memory search query is required.");
@@ -384,7 +402,7 @@ export function searchMemoryNotes({
     ? path.join(vaultRoot, relativeFolder)
     : vaultRoot;
 
-  if (!fs.existsSync(targetDir)) {
+  if (!(await pathExists(targetDir))) {
     return [];
   }
 
@@ -392,11 +410,11 @@ export function searchMemoryNotes({
     .map((tag) => tag.trim().toLowerCase())
     .filter(Boolean);
 
-  return collectMarkdownFiles(targetDir)
-    .map((absolutePath) => {
-      const raw = fs.readFileSync(absolutePath, "utf-8");
+  const matches = await Promise.all(
+    (await collectMarkdownFiles(targetDir)).map(async (absolutePath) => {
+      const raw = await readFile(absolutePath, "utf-8");
       const parsed = parseFrontmatter(raw);
-      const summary = toSummary(absolutePath, vaultRoot);
+      const summary = await toSummary(absolutePath, vaultRoot, raw);
       const haystack =
         `${summary.title}\n${summary.relativePath}\n${parsed.body}`.toLowerCase();
       const hasQuery = haystack.includes(loweredQuery);
@@ -407,20 +425,22 @@ export function searchMemoryNotes({
         );
 
       return hasQuery && hasTags ? summary : null;
-    })
+    }),
+  );
+  return matches
     .filter((item): item is MemoryNoteSummary => item !== null)
     .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))
     .slice(0, Math.max(1, limit));
 }
 
-export function capturePageToVault({
+export async function capturePageToVault({
   page,
   title,
   folder,
   summary,
   note,
   tags = [],
-}: CapturePageNoteInput): SavedMemoryNote {
+}: CapturePageNoteInput): Promise<SavedMemoryNote> {
   const noteTitle = title?.trim() || page.title.trim() || page.url;
   const bodyLines = [
     `# ${noteTitle}`,
@@ -452,7 +472,7 @@ export function capturePageToVault({
     bodyLines.push("## Page Snapshot", "", snapshot, "");
   }
 
-  return writeMemoryNote({
+  return await writeMemoryNote({
     title: noteTitle,
     body: bodyLines.join("\n"),
     folder: folder || DEFAULT_PAGE_FOLDER,
@@ -464,16 +484,16 @@ export function capturePageToVault({
   });
 }
 
-export function linkBookmarkToMemory({
+export async function linkBookmarkToMemory({
   bookmark,
   notePath,
   title,
   folder,
   note,
   tags = [],
-}: LinkBookmarkToMemoryInput): SavedMemoryNote {
+}: LinkBookmarkToMemoryInput): Promise<SavedMemoryNote> {
   if (notePath?.trim()) {
-    return appendToMemoryNote({
+    return await appendToMemoryNote({
       notePath,
       heading: "Linked Bookmark",
       content: [
@@ -489,7 +509,7 @@ export function linkBookmarkToMemory({
   }
 
   const noteTitle = title?.trim() || bookmark.title || bookmark.url;
-  return writeMemoryNote({
+  return await writeMemoryNote({
     title: noteTitle,
     body: renderBookmarkLinkBlock(bookmark, note),
     folder: folder || DEFAULT_BOOKMARK_FOLDER,

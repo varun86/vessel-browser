@@ -24,8 +24,8 @@ tmp/
 *.tests/*
 
 # AI tool configs (personal, not project-level)
-.claude/settings.json
-.claude/settings.local.json
+
+*.claude/
 .agents/
 .gitnexus
 .security-audit-ignore
@@ -98,3 +98,4 @@ scripts/cloudflare-worker/vessel-premium-api.js
 
 # macOS Finder metadata
 .DS_Store
+.claude/plan.md
