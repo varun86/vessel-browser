@@ -2378,21 +2378,6 @@
     gap: 8px;
 }
 
-.kit-beta-tag {
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--accent-primary);
-    background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent-primary) 25%, transparent);
-    border-radius: 4px;
-    padding: 1px 5px;
-    vertical-align: middle;
-    position: relative;
-    top: -1px;
-}
-
 .kit-list-count {
     font-size: 10px;
     font-weight: 600;
@@ -2458,6 +2443,96 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+
+.kit-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 22px 14px 20px;
+    border-radius: var(--radius-md);
+    background: var(--surface-elevated);
+    border: 1px dashed var(--border-glass);
+    text-align: center;
+}
+
+.kit-empty-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.kit-empty-copy {
+    max-width: 220px;
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.kit-empty-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.kit-create-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border-radius: var(--radius-md);
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-glass);
+}
+
+.kit-create-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.kit-create-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.kit-create-textarea {
+    width: 100%;
+    min-height: 220px;
+    resize: vertical;
+    padding: 9px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-glass);
+    background: var(--surface-base);
+    color: var(--text-primary);
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    line-height: 1.45;
+    outline: none;
+    transition:
+        border-color var(--duration-fast) var(--ease-in-out),
+        background var(--duration-fast) var(--ease-in-out);
+}
+
+.kit-create-textarea:focus {
+    border-color: color-mix(in srgb, var(--accent-primary) 35%, transparent);
+    background: var(--surface-hover);
+}
+
+.kit-create-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.kit-create-save {
+    height: 28px;
+    padding: 0 10px;
 }
 
 .kit-card {

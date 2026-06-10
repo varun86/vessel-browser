@@ -30,6 +30,7 @@ import {
   MAX_DEVTOOLS_PANEL,
 } from "../window";
 import {
+  createKitFromText,
   getInstalledKits,
   installKitFromFile,
   uninstallKit,
@@ -38,6 +39,7 @@ import { getScheduledKitIds } from "../automation/scheduler";
 import { assertFeatureUnlocked } from "../premium/manager";
 
 const KitIdSchema = z.string().min(1);
+const SkillSourceSchema = z.string().min(1).max(100_000);
 const OriginSchema = z.string().min(1);
 
 export function registerSystemHandlers(
@@ -71,6 +73,14 @@ export function registerSystemHandlers(
     assertTrustedIpcSender(event);
     assertFeatureUnlocked("automation_kits", "Skills");
     return await installKitFromFile();
+  });
+
+  ipcMain.handle(Channels.AUTOMATION_CREATE_FROM_TEXT, async (event, source: unknown) => {
+    assertTrustedIpcSender(event);
+    assertFeatureUnlocked("automation_kits", "Skills");
+    return await createKitFromText(
+      parseIpc(SkillSourceSchema, source, "source"),
+    );
   });
 
   ipcMain.handle(Channels.AUTOMATION_UNINSTALL, async (event, id: unknown) => {

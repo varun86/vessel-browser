@@ -83,7 +83,7 @@ export async function getInstalledKits(): Promise<AutomationKit[]> {
 export async function installKitFromFile(): Promise<Result<{ kit: AutomationKit }>> {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: "Import Skill",
-    filters: [{ name: "Agent Skill", extensions: ["skill.json", "kit.json", "json"] }],
+    filters: [{ name: "Skills", extensions: ["skill.json", "json"] }],
     properties: ["openFile"],
   });
 
@@ -129,6 +129,45 @@ export async function installKitFromFile(): Promise<Result<{ kit: AutomationKit 
   } catch (err) {
     logger.warn("Failed to save skill file:", err);
     return errorResult("Failed to save the skill file.");
+  }
+
+  return okResult({ kit: parsed });
+}
+
+export async function createKitFromText(
+  source: string,
+): Promise<Result<{ kit: AutomationKit }>> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch (err) {
+    logger.warn("Created skill text is not valid JSON:", err);
+    return errorResult("Skill text is not valid JSON.");
+  }
+
+  if (!isValidKit(parsed)) {
+    return errorResult(
+      "Text is not a valid skill. Required fields: id, name, description, icon, inputs, promptTemplate.",
+    );
+  }
+
+  if (BUNDLED_KIT_IDS.has(parsed.id)) {
+    return errorResult(
+      `Skill id "${parsed.id}" conflicts with a built-in skill and cannot be overwritten.`,
+    );
+  }
+
+  await ensureKitsDir();
+  const dest = getKitFilePath(parsed.id);
+  if (!dest) {
+    return errorResult("Skill id contains unsupported characters.");
+  }
+
+  try {
+    await writeFile(dest, JSON.stringify(parsed, null, 2), "utf-8");
+  } catch (err) {
+    logger.warn("Failed to save created skill:", err);
+    return errorResult("Failed to save the skill.");
   }
 
   return okResult({ kit: parsed });
