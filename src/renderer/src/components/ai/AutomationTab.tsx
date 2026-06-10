@@ -19,6 +19,10 @@ import {
   Star,
   Zap,
   Clock,
+  ChevronRight,
+  Eye,
+  Trash2,
+  Upload,
   type IconProps,
 } from "lucide-solid";
 import { BUNDLED_KIT_IDS } from "../../../../shared/automation-kit-constants";
@@ -101,7 +105,7 @@ function toLocalDateTimeInput(iso: string): string {
 }
 
 interface AutomationTabProps {
-  /** Called after launching a kit so the parent can switch to the supervisor tab */
+  /** Called after launching a skill so the parent can switch to the supervisor tab */
   onRun: () => void;
 }
 
@@ -297,7 +301,7 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
     e.stopPropagation();
     const result = await window.vessel.automation.uninstall(id);
     if (!result.ok) {
-      setInstallError(result.error ?? "Could not remove kit.");
+      setInstallError(result.error ?? "Could not remove skill.");
       return;
     }
     void refetchInstalled();
@@ -391,8 +395,8 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
           </div>
           <p class="kit-upsell-title">Vessel Premium</p>
           <p class="kit-upsell-body">
-            Automation Kits are a premium feature. Upgrade to unlock pre-built
-            workflows you can launch with one click.
+            Skills are a premium feature. Upgrade to import, inspect, and run
+            reusable agent capabilities.
           </p>
           <button
             class="agent-primary-button kit-upsell-btn"
@@ -404,19 +408,21 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
         </div>
       </Show>
 
-      {/* ── Kit list ── */}
+      {/* ── Skill list ── */}
       <Show when={isPremium() && selectedKit() === null}>
         <div class="kit-list-header">
-          <span class="agent-panel-title">Automation Kits <span class="kit-beta-tag">Beta</span></span>
+          <span class="agent-panel-title">Skills <span class="kit-beta-tag">Beta</span></span>
           <div class="kit-list-header-actions">
-            <span class="kit-list-count">{allKits().length} kits</span>
+            <span class="kit-list-count">{allKits().length} skills</span>
             <button
               class="kit-install-btn"
               type="button"
-              title="Install a kit from a .kit.json file"
+              title="Import a skill from a .skill.json or .kit.json file"
               onClick={() => void handleInstall()}
+              aria-label="Import skill"
             >
-              + Install
+              <Upload size={12} aria-hidden="true" />
+              Import
             </button>
           </div>
         </div>
@@ -458,32 +464,33 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
                 <Show
                   when={!BUNDLED_KIT_IDS.has(kit.id)}
                   fallback={
-                    <svg
+                    <ChevronRight
                       class="kit-card-caret"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 14 14"
-                      fill="none"
+                      size={14}
                       aria-hidden="true"
-                    >
-                      <path
-                        d="M5 3l4 4-4 4"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
+                    />
                   }
                 >
                   <button
+                    class="kit-card-action-btn"
+                    type="button"
+                    title={`View ${kit.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectKit(kit);
+                    }}
+                    aria-label={`View ${kit.name}`}
+                  >
+                    <Eye size={13} aria-hidden="true" />
+                  </button>
+                  <button
                     class="kit-remove-btn"
                     type="button"
-                    title={`Remove ${kit.name}`}
+                    title={`Delete ${kit.name}`}
                     onClick={(e) => void handleUninstall(e, kit.id)}
-                    aria-label={`Remove ${kit.name}`}
+                    aria-label={`Delete ${kit.name}`}
                   >
-                    ×
+                    <Trash2 size={13} aria-hidden="true" />
                   </button>
                 </Show>
               </div>
@@ -636,7 +643,7 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
         </Show>
       </Show>
 
-      {/* ── Kit form ── */}
+      {/* ── Skill form ── */}
       <Show when={isPremium() && selectedKit() !== null}>
         <>
           <div class="kit-form-header">
@@ -644,7 +651,7 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
               class="kit-back-btn"
               type="button"
               onClick={() => { setSelectedKit(null); setEditingTaskJobId(null); }}
-              title="Back to kits"
+              title="Back to skills"
             >
               <svg
                 width="14"
@@ -742,7 +749,7 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
                 </>
               }
             >
-              Run Kit
+              Run Skill
             </Show>
           </button>
 
@@ -839,7 +846,7 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
                   disabled={!canSchedule()}
                   onClick={() => void handleSchedule()}
                 >
-                  {editingTaskJobId() ? "Save Changes" : "Schedule Kit"}
+                  {editingTaskJobId() ? "Save Changes" : "Schedule Skill"}
                 </button>
               </div>
             </Show>

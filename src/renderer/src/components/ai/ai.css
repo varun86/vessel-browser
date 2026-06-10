@@ -2349,7 +2349,7 @@
 }
 
 /* ═══════════════════════════════════════
-   Automation Kits panel
+   Skills panel
    ═══════════════════════════════════════ */
 
 .automation-panel {
@@ -2402,6 +2402,10 @@
 }
 
 .kit-install-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
     height: 22px;
     padding: 0 8px;
     border-radius: var(--radius-sm);
@@ -2535,13 +2539,12 @@
     color: var(--accent-primary);
 }
 
+.kit-card-action-btn,
 .kit-remove-btn {
     flex-shrink: 0;
     width: 20px;
     height: 20px;
     border-radius: var(--radius-sm);
-    font-size: 15px;
-    line-height: 1;
     color: var(--text-muted);
     background: transparent;
     border: 1px solid transparent;
@@ -2552,6 +2555,12 @@
         background var(--duration-fast) var(--ease-in-out),
         color var(--duration-fast) var(--ease-in-out),
         border-color var(--duration-fast) var(--ease-in-out);
+}
+
+.kit-card-action-btn:hover {
+    background: var(--surface-hover);
+    border-color: var(--border-glass);
+    color: var(--text-primary);
 }
 
 .kit-remove-btn:hover {

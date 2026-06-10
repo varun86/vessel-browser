@@ -63,19 +63,19 @@ export function registerSystemHandlers(
 
   ipcMain.handle(Channels.AUTOMATION_GET_INSTALLED, async (event) => {
     assertTrustedIpcSender(event);
-    assertFeatureUnlocked("automation_kits", "Automation kit access");
+    assertFeatureUnlocked("automation_kits", "Skills");
     return await getInstalledKits();
   });
 
   ipcMain.handle(Channels.AUTOMATION_INSTALL_FROM_FILE, async (event) => {
     assertTrustedIpcSender(event);
-    assertFeatureUnlocked("automation_kits", "Automation kit access");
+    assertFeatureUnlocked("automation_kits", "Skills");
     return await installKitFromFile();
   });
 
   ipcMain.handle(Channels.AUTOMATION_UNINSTALL, async (event, id: unknown) => {
     assertTrustedIpcSender(event);
-    assertFeatureUnlocked("automation_kits", "Automation kit access");
+    assertFeatureUnlocked("automation_kits", "Skills");
     return await uninstallKit(
       parseIpc(KitIdSchema, id, "id"),
       getScheduledKitIds(),

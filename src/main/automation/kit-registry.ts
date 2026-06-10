@@ -71,10 +71,10 @@ export async function getInstalledKits(): Promise<AutomationKit[]> {
       if (isValidKit(parsed)) {
         kits.push(parsed);
       } else {
-        logger.warn(`Skipping invalid kit file: ${file}`);
+        logger.warn(`Skipping invalid skill file: ${file}`);
       }
     } catch (err) {
-      logger.warn(`Failed to read kit file: ${file}`, err);
+      logger.warn(`Failed to read skill file: ${file}`, err);
     }
   }
   return kits;
@@ -82,8 +82,8 @@ export async function getInstalledKits(): Promise<AutomationKit[]> {
 
 export async function installKitFromFile(): Promise<Result<{ kit: AutomationKit }>> {
   const { canceled, filePaths } = await dialog.showOpenDialog({
-    title: "Install Automation Kit",
-    filters: [{ name: "Automation Kit", extensions: ["kit.json", "json"] }],
+    title: "Import Skill",
+    filters: [{ name: "Agent Skill", extensions: ["skill.json", "kit.json", "json"] }],
     properties: ["openFile"],
   });
 
@@ -95,7 +95,7 @@ export async function installKitFromFile(): Promise<Result<{ kit: AutomationKit 
   try {
     raw = await readFile(filePaths[0], "utf-8");
   } catch (err) {
-    logger.warn("Failed to read selected kit file:", err);
+    logger.warn("Failed to read selected skill file:", err);
     return errorResult("Could not read the selected file.");
   }
 
@@ -103,32 +103,32 @@ export async function installKitFromFile(): Promise<Result<{ kit: AutomationKit 
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    logger.warn("Selected kit file is not valid JSON:", err);
+    logger.warn("Selected skill file is not valid JSON:", err);
     return errorResult("File is not valid JSON.");
   }
 
   if (!isValidKit(parsed)) {
     return errorResult(
-      "File is not a valid automation kit. Required fields: id, name, description, icon, inputs, promptTemplate.",
+      "File is not a valid skill. Required fields: id, name, description, icon, inputs, promptTemplate.",
     );
   }
 
   if (BUNDLED_KIT_IDS.has(parsed.id)) {
     return errorResult(
-      `Kit id "${parsed.id}" conflicts with a built-in kit and cannot be overwritten.`,
+      `Skill id "${parsed.id}" conflicts with a built-in skill and cannot be overwritten.`,
     );
   }
 
   await ensureKitsDir();
   const dest = getKitFilePath(parsed.id);
   if (!dest) {
-    return errorResult("Kit id contains unsupported characters.");
+    return errorResult("Skill id contains unsupported characters.");
   }
   try {
     await writeFile(dest, JSON.stringify(parsed, null, 2), "utf-8");
   } catch (err) {
-    logger.warn("Failed to save kit file:", err);
-    return errorResult("Failed to save the kit file.");
+    logger.warn("Failed to save skill file:", err);
+    return errorResult("Failed to save the skill file.");
   }
 
   return okResult({ kit: parsed });
@@ -139,29 +139,29 @@ export async function uninstallKit(
   scheduledKitIds?: ReadonlySet<string>,
 ): Promise<Result> {
   if (BUNDLED_KIT_IDS.has(id)) {
-    return errorResult("Built-in kits cannot be removed.");
+    return errorResult("Built-in skills cannot be removed.");
   }
 
   if (scheduledKitIds?.has(id)) {
     return errorResult(
-      "This kit has active scheduled jobs. Delete or reassign them first.",
+      "This skill has active scheduled jobs. Delete or reassign them first.",
     );
   }
 
   await ensureKitsDir();
   const target = getKitFilePath(id);
   if (!target) {
-    return errorResult("Kit id contains unsupported characters.");
+    return errorResult("Skill id contains unsupported characters.");
   }
   if (!(await pathExists(target))) {
-    return errorResult("Kit not found.");
+    return errorResult("Skill not found.");
   }
 
   try {
     await unlink(target);
     return okResult();
   } catch (err) {
-    logger.warn("Failed to remove kit file:", err);
-    return errorResult("Failed to remove the kit file.");
+    logger.warn("Failed to remove skill file:", err);
+    return errorResult("Failed to remove the skill file.");
   }
 }

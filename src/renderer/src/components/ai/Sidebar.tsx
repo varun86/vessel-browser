@@ -979,7 +979,7 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
             aria-selected={sidebarTab() === "automation"}
             onClick={() => setSidebarTab("automation")}
           >
-            Automate
+            Skills
           </button>
           <button
             class="sidebar-tab"

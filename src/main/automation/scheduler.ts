@@ -249,7 +249,7 @@ async function fireJob(
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
-    appendActivity(`\n[Scheduled Kit Error: ${msg}]`);
+    appendActivity(`\n[Scheduled Skill Error: ${msg}]`);
     finishActivity("failed");
   }
 }
@@ -332,13 +332,13 @@ export function registerScheduleHandlers(
 
   ipcMain.handle(Channels.SCHEDULE_GET_ALL, (event) => {
     assertTrustedIpcSender(event);
-    assertFeatureUnlocked("automation_kits", "Automation kit access");
+    assertFeatureUnlocked("automation_kits", "Skills");
     return jobs;
   });
 
   ipcMain.handle(Channels.SCHEDULE_CREATE, (event, rawJob: unknown) => {
     assertTrustedIpcSender(event);
-    assertFeatureUnlocked("automation_kits", "Automation kit access");
+    assertFeatureUnlocked("automation_kits", "Skills");
     if (!isValidJobData(rawJob)) {
       throw new Error(
         "Invalid job data. Required: kitId, kitName, kitIcon, renderedPrompt, schedule, enabled.",
@@ -358,7 +358,7 @@ export function registerScheduleHandlers(
 
   ipcMain.handle(Channels.SCHEDULE_UPDATE, (event, id: unknown, updates: unknown) => {
     assertTrustedIpcSender(event);
-    assertFeatureUnlocked("automation_kits", "Automation kit access");
+    assertFeatureUnlocked("automation_kits", "Skills");
     if (typeof id !== "string") throw new Error("id must be a string");
     const job = jobs.find((j) => j.id === id);
     if (!job) return null;
@@ -387,7 +387,7 @@ export function registerScheduleHandlers(
 
   ipcMain.handle(Channels.SCHEDULE_DELETE, (event, id: unknown) => {
     assertTrustedIpcSender(event);
-    assertFeatureUnlocked("automation_kits", "Automation kit access");
+    assertFeatureUnlocked("automation_kits", "Skills");
     if (typeof id !== "string") throw new Error("id must be a string");
     const before = jobs.length;
     jobs = jobs.filter((j) => j.id !== id);

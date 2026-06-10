@@ -333,8 +333,8 @@ test("premium assertions block gated tools and features for free users", async (
       /DevTools requires Vessel Premium/,
     );
     assert.throws(
-      () => assertFeatureUnlocked("automation_kits", "Automation kit access"),
-      /Automation kit access requires Vessel Premium/,
+      () => assertFeatureUnlocked("automation_kits", "Skills"),
+      /Skills requires Vessel Premium/,
     );
     assert.doesNotThrow(() => assertToolUnlocked("navigate"));
   } finally {
@@ -361,7 +361,7 @@ test("premium assertions allow gated tools and features for active premium users
       assertFeatureUnlocked("devtools", "DevTools"),
     );
     assert.doesNotThrow(() =>
-      assertFeatureUnlocked("automation_kits", "Automation kit access"),
+      assertFeatureUnlocked("automation_kits", "Skills"),
     );
   } finally {
     setPremiumStatusForTest("free", "");
