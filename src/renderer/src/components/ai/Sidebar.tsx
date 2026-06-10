@@ -202,6 +202,21 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
   const slashSuggestions = createMemo(() =>
     getSkillSlashSuggestions(chatInput(), allSkillKits()),
   );
+  const recognizedSkillInvocation = createMemo(() => {
+    const input = chatInput().trimStart();
+    if (!input.startsWith("/")) return null;
+    return parseSkillSlashInvocation(input, allSkillKits());
+  });
+  const recognizedSkillInputParts = createMemo(() => {
+    if (recognizedSkillInvocation() === null) return null;
+    const match = chatInput().match(/^(\s*)(\/\S+)([\s\S]*)$/);
+    if (!match) return null;
+    return {
+      leading: match[1],
+      command: match[2],
+      rest: match[3],
+    };
+  });
 
   const loadInstalledSkillKits = async (): Promise<AutomationKit[]> => {
     try {
@@ -2865,43 +2880,64 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
             </div>
           </Show>
           <div class="sidebar-input-area">
-            <textarea
-              class="sidebar-input"
-              rows={2}
-              placeholder={isStreaming() ? "Send now to queue the next prompt..." : "Ask anything or run /skill-id..."}
-              ref={chatInputRef}
-              value={chatInput()}
-              onInput={(e) => {
-                setChatInput(e.currentTarget.value);
-                if (chatCommandError()) setChatCommandError(null);
-                if (e.currentTarget.value.startsWith("/")) {
-                  void loadInstalledSkillKits();
-                }
+            <div
+              class="sidebar-input-frame"
+              classList={{
+                "skill-command-registered": recognizedSkillInputParts() !== null,
               }}
-              onKeyDown={(e) => {
-                if (slashSuggestions().length > 0) {
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    moveSlashSuggestion(1);
-                    return;
+            >
+              <Show when={recognizedSkillInputParts()}>
+                {(parts) => (
+                  <div class="sidebar-input-highlight" aria-hidden="true">
+                    {parts().leading}
+                    <span class="sidebar-input-highlight-command">
+                      {parts().command}
+                    </span>
+                    {parts().rest || "\u00a0"}
+                  </div>
+                )}
+              </Show>
+              <textarea
+                class="sidebar-input"
+                classList={{
+                  "skill-command-registered": recognizedSkillInputParts() !== null,
+                }}
+                rows={2}
+                placeholder={isStreaming() ? "Send now to queue the next prompt..." : "Ask anything or run /skill-id..."}
+                ref={chatInputRef}
+                value={chatInput()}
+                onInput={(e) => {
+                  setChatInput(e.currentTarget.value);
+                  if (chatCommandError()) setChatCommandError(null);
+                  if (e.currentTarget.value.startsWith("/")) {
+                    void loadInstalledSkillKits();
                   }
-                  if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    moveSlashSuggestion(-1);
-                    return;
+                }}
+                onKeyDown={(e) => {
+                  if (slashSuggestions().length > 0) {
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      moveSlashSuggestion(1);
+                      return;
+                    }
+                    if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      moveSlashSuggestion(-1);
+                      return;
+                    }
+                    if (e.key === "Enter" || e.key === "Tab") {
+                      e.preventDefault();
+                      applyActiveSkillSuggestion();
+                      return;
+                    }
                   }
-                  if (e.key === "Enter" || e.key === "Tab") {
+                  if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    applyActiveSkillSuggestion();
-                    return;
+                    void handleChatSend();
                   }
-                }
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void handleChatSend();
-                }
-              }}
-            />
+                }}
+              />
+            </div>
             <button
               class="sidebar-send"
               disabled={!chatInput().trim()}
