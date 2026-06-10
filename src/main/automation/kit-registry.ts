@@ -173,6 +173,52 @@ export async function createKitFromText(
   return okResult({ kit: parsed });
 }
 
+export async function updateKitFromText(
+  id: string,
+  source: string,
+): Promise<Result<{ kit: AutomationKit }>> {
+  if (BUNDLED_KIT_IDS.has(id)) {
+    return errorResult("Built-in skills cannot be edited.");
+  }
+
+  const target = getKitFilePath(id);
+  if (!target) {
+    return errorResult("Skill id contains unsupported characters.");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch (err) {
+    logger.warn("Updated skill text is not valid JSON:", err);
+    return errorResult("Skill text is not valid JSON.");
+  }
+
+  if (!isValidKit(parsed)) {
+    return errorResult(
+      "Text is not a valid skill. Required fields: id, name, description, icon, inputs, promptTemplate.",
+    );
+  }
+
+  if (parsed.id !== id) {
+    return errorResult("Skill id cannot be changed while editing.");
+  }
+
+  await ensureKitsDir();
+  if (!(await pathExists(target))) {
+    return errorResult("Skill not found.");
+  }
+
+  try {
+    await writeFile(target, JSON.stringify(parsed, null, 2), "utf-8");
+  } catch (err) {
+    logger.warn("Failed to update skill:", err);
+    return errorResult("Failed to update the skill.");
+  }
+
+  return okResult({ kit: parsed });
+}
+
 export async function uninstallKit(
   id: string,
   scheduledKitIds?: ReadonlySet<string>,

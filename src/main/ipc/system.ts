@@ -33,6 +33,7 @@ import {
   createKitFromText,
   getInstalledKits,
   installKitFromFile,
+  updateKitFromText,
   uninstallKit,
 } from "../automation/kit-registry";
 import { getScheduledKitIds } from "../automation/scheduler";
@@ -79,6 +80,15 @@ export function registerSystemHandlers(
     assertTrustedIpcSender(event);
     assertFeatureUnlocked("automation_kits", "Skills");
     return await createKitFromText(
+      parseIpc(SkillSourceSchema, source, "source"),
+    );
+  });
+
+  ipcMain.handle(Channels.AUTOMATION_UPDATE_FROM_TEXT, async (event, id: unknown, source: unknown) => {
+    assertTrustedIpcSender(event);
+    assertFeatureUnlocked("automation_kits", "Skills");
+    return await updateKitFromText(
+      parseIpc(KitIdSchema, id, "id"),
       parseIpc(SkillSourceSchema, source, "source"),
     );
   });

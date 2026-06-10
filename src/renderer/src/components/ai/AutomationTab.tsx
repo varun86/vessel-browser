@@ -21,6 +21,7 @@ import {
   Clock,
   ChevronRight,
   Eye,
+  Pencil,
   Plus,
   Trash2,
   Upload,
@@ -114,6 +115,54 @@ function createSkillId(name: string): string {
   return slug ? `custom-${slug}` : `custom-skill-${Date.now()}`;
 }
 
+const SIMPLE_TASK_PROMPT_SUFFIX = "\n\nTask:\n{{task}}";
+
+function isSimpleTaskSkill(kit: AutomationKit): boolean {
+  return (
+    kit.inputs.length === 1 &&
+    kit.inputs[0]?.key === "task" &&
+    kit.inputs[0]?.type === "textarea"
+  );
+}
+
+function getEditableInstructions(kit: AutomationKit): string {
+  if (isSimpleTaskSkill(kit) && kit.promptTemplate.endsWith(SIMPLE_TASK_PROMPT_SUFFIX)) {
+    return kit.promptTemplate.slice(0, -SIMPLE_TASK_PROMPT_SUFFIX.length);
+  }
+  return kit.promptTemplate;
+}
+
+function buildSkillDraft(
+  name: string,
+  description: string,
+  instructions: string,
+  existing?: AutomationKit,
+): AutomationKit {
+  const simpleTaskSkill = !existing || isSimpleTaskSkill(existing);
+  return {
+    id: existing?.id ?? createSkillId(name),
+    name,
+    description: description || "Custom agent skill.",
+    category: existing?.category ?? "productivity",
+    icon: existing?.icon ?? "Zap",
+    estimatedMinutes: existing?.estimatedMinutes ?? 3,
+    inputs: simpleTaskSkill
+      ? [
+          {
+            key: "task",
+            label: "Task",
+            type: "textarea",
+            placeholder: "What should the agent do with this skill?",
+            required: true,
+          },
+        ]
+      : existing.inputs,
+    promptTemplate: simpleTaskSkill
+      ? `${instructions}${SIMPLE_TASK_PROMPT_SUFFIX}`
+      : instructions,
+  };
+}
+
 interface AutomationTabProps {
   /** Called after launching a skill so the parent can switch to the supervisor tab */
   onRun: () => void;
@@ -130,6 +179,8 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
   const [createDescription, setCreateDescription] = createSignal("");
   const [createInstructions, setCreateInstructions] = createSignal("");
   const [createError, setCreateError] = createSignal<string | null>(null);
+  const [savingSkill, setSavingSkill] = createSignal(false);
+  const [editingSkill, setEditingSkill] = createSignal<AutomationKit | null>(null);
 
   // Schedule form state
   const [scheduleEnabled, setScheduleEnabled] = createSignal(false);
@@ -171,7 +222,7 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
       if (e.key === "Escape") {
         setOpenMenuJobId(null);
         setEditingJob(null);
-        setCreateEditorOpen(false);
+        closeCreateEditor();
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -317,22 +368,49 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
   const openCreateEditor = () => {
     setInstallError(null);
     setCreateError(null);
+    setSavingSkill(false);
+    setEditingSkill(null);
+    setCreateName("");
+    setCreateDescription("");
+    setCreateInstructions("");
     setCreateEditorOpen(true);
   };
 
   const closeCreateEditor = () => {
     setCreateEditorOpen(false);
     setCreateError(null);
+    setSavingSkill(false);
+    setEditingSkill(null);
   };
 
-  const resetCreateDraft = () => {
+  const clearCreateDraft = () => {
     setCreateName("");
     setCreateDescription("");
     setCreateInstructions("");
+  };
+
+  const resetCreateDraft = () => {
+    const skill = editingSkill();
+    setCreateName(skill?.name ?? "");
+    setCreateDescription(skill?.description ?? "");
+    setCreateInstructions(skill ? getEditableInstructions(skill) : "");
     setCreateError(null);
   };
 
-  const handleCreateSkill = async () => {
+  const handleOpenEditSkill = (e: MouseEvent, kit: AutomationKit) => {
+    e.stopPropagation();
+    if (BUNDLED_KIT_IDS.has(kit.id)) return;
+    setInstallError(null);
+    setCreateError(null);
+    setEditingSkill(kit);
+    setCreateName(kit.name);
+    setCreateDescription(kit.description);
+    setCreateInstructions(getEditableInstructions(kit));
+    setCreateEditorOpen(true);
+  };
+
+  const handleSaveSkill = async () => {
+    if (savingSkill()) return;
     setInstallError(null);
     setCreateError(null);
     const name = createName().trim();
@@ -342,35 +420,41 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
       return;
     }
 
-    const skill: AutomationKit = {
-      id: createSkillId(name),
+    const existing = editingSkill() ?? undefined;
+    const skill = buildSkillDraft(
       name,
-      description: createDescription().trim() || "Custom agent skill.",
-      category: "productivity",
-      icon: "Zap",
-      estimatedMinutes: 3,
-      inputs: [
-        {
-          key: "task",
-          label: "Task",
-          type: "textarea",
-          placeholder: "What should the agent do with this skill?",
-          required: true,
-        },
-      ],
-      promptTemplate: `${instructions}\n\nTask:\n{{task}}`,
-    };
-
-    const result = await window.vessel.automation.createFromText(
-      JSON.stringify(skill),
+      createDescription().trim(),
+      instructions,
+      existing,
     );
-    if (!result.ok) {
-      setCreateError(result.error ?? "Could not create skill.");
-      return;
+
+    setSavingSkill(true);
+    try {
+      const source = JSON.stringify(skill);
+      const automationApi = window.vessel.automation as typeof window.vessel.automation & {
+        updateFromText?: (
+          id: string,
+          source: string,
+        ) => Promise<{ ok: boolean; kit?: AutomationKit; error?: string }>;
+      };
+      const result = existing && automationApi.updateFromText
+        ? await automationApi.updateFromText(existing.id, source)
+        : await window.vessel.automation.createFromText(source);
+
+      if (!result.ok) {
+        setCreateError(result.error ?? "Could not save skill.");
+        return;
+      }
+
+      setCreateEditorOpen(false);
+      setEditingSkill(null);
+      clearCreateDraft();
+      void refetchInstalled();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Could not save skill.");
+    } finally {
+      setSavingSkill(false);
     }
-    setCreateEditorOpen(false);
-    resetCreateDraft();
-    void refetchInstalled();
   };
 
   const handleUninstall = async (e: MouseEvent, id: string) => {
@@ -530,7 +614,9 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
         <Show when={createEditorOpen()}>
           <div class="kit-create-panel">
             <div class="kit-create-header">
-              <span class="kit-create-title">Create Skill</span>
+              <span class="kit-create-title">
+                {editingSkill() ? "Edit Skill" : "Create Skill"}
+              </span>
               <button
                 class="kit-install-error-dismiss"
                 type="button"
@@ -591,9 +677,14 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
               <button
                 class="agent-primary-button kit-create-save"
                 type="button"
-                onClick={() => void handleCreateSkill()}
+                disabled={savingSkill()}
+                onClick={() => void handleSaveSkill()}
               >
-                Save Skill
+                {savingSkill()
+                  ? "Saving..."
+                  : editingSkill()
+                    ? "Save Changes"
+                    : "Save Skill"}
               </button>
             </div>
           </div>
@@ -658,6 +749,15 @@ const AutomationTab: Component<AutomationTabProps> = (props) => {
                       />
                     }
                   >
+                    <button
+                      class="kit-card-action-btn"
+                      type="button"
+                      title={`Edit ${kit.name}`}
+                      onClick={(e) => handleOpenEditSkill(e, kit)}
+                      aria-label={`Edit ${kit.name}`}
+                    >
+                      <Pencil size={13} aria-hidden="true" />
+                    </button>
                     <button
                       class="kit-card-action-btn"
                       type="button"
