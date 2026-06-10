@@ -33,6 +33,7 @@ function renderPage(title: string, body: string): string {
       <a href="/search-visibility">Search visibility</a>
       <a href="/focused-search">Focused search</a>
       <a href="/article-summary">Article summary</a>
+      <a href="/article-script-blocked">Script-blocked article</a>
       <a href="/search-no-shortcut">Search no shortcut</a>
       <a href="/language-popup">Language popup</a>
       <a href="/cookie-banner-ambiguous">Cookie banner</a>
@@ -796,6 +797,30 @@ export async function createNavigationHarnessServer(): Promise<NavigationHarness
                 <p>Researchers study reliability, interpretability, alignment, robustness, and social impacts so that increasingly capable systems can be evaluated and deployed responsibly.</p>
               </article>
             </main>
+          `,
+        ),
+      );
+      return;
+    }
+
+    if (method === "GET" && url.pathname === "/article-script-blocked") {
+      sendHtml(
+        res,
+        renderPage(
+          "article-script-blocked",
+          `
+            <article>
+              <h1>Renderer independent article</h1>
+              <p>Renderer independent extraction keeps readable page content available even when the page JavaScript thread stops responding.</p>
+              <h2>Why it matters</h2>
+              <p>Static article pages should remain readable to the agent because the main process can fetch and parse the current document URL without asking the page to run scripts.</p>
+              <p>This mirrors encyclopedia pages and long-form articles where the HTML is available but renderer-side script execution can become unreliable during navigation or loading.</p>
+            </article>
+            <script>
+              setTimeout(() => {
+                while (true) {}
+              }, 50);
+            </script>
           `,
         ),
       );

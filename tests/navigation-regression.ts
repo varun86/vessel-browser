@@ -958,6 +958,28 @@ async function main(): Promise<void> {
     );
 
     await runScenario(
+      "read_page summary falls back to network article text when page scripts are blocked",
+      async () => {
+        await withTab(`${harness.baseUrl}/article-script-blocked`, async (tab) => {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+
+          const result = await executeAction(
+            "read_page",
+            { mode: "summary" },
+            buildActionContextForTab(tab),
+          );
+
+          assert.match(result, /\[read_page mode=summary — network article fallback/);
+          assert.match(result, /Renderer independent extraction keeps readable page content available/);
+          assert.doesNotMatch(result, /page JS thread is completely blocked/);
+        });
+      },
+    );
+    completedScenarios.push(
+      "read_page summary falls back to network article text when page scripts are blocked",
+    );
+
+    await runScenario(
       "search prefers the visible desktop search box and nearby button",
       async () => {
         await withTab(`${harness.baseUrl}/search-visibility`, async (tab) => {

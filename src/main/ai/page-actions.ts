@@ -84,6 +84,7 @@ import {
 } from "./page-actions/core";
 import {
   fastArticleTextExtract,
+  fetchArticleTextExtract,
   glanceExtract,
   normalizeReadPageMode,
   getPostNavSummary,
@@ -4005,6 +4006,13 @@ export async function executeAction(
             );
             if (fastArticleText) {
               return fastArticleText;
+            }
+            const fetchedArticleText = await fetchArticleTextExtract(
+              wc,
+              requestedTextMode,
+            );
+            if (fetchedArticleText) {
+              return fetchedArticleText;
             }
           }
 
