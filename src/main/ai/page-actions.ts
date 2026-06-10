@@ -7,6 +7,7 @@ import {
   buildOverlayInventory,
   getBlockingOverlaySignature,
 } from "../content/overlay-inventory";
+import { extractContent } from "../content/extractor";
 import * as highlightsManager from "../highlights/manager";
 import { highlightOnPage, clearHighlights } from "../highlights/inject";
 import {

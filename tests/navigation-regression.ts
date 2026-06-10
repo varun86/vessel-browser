@@ -8,6 +8,7 @@ import { buildScopedContext } from "../src/main/ai/context-builder";
 import { extractContent } from "../src/main/content/extractor";
 import {
   clickElementBySelector,
+  clearOverlays,
   dismissPopup,
   executeAction,
   fillFormFields,
@@ -1024,6 +1025,30 @@ async function main(): Promise<void> {
       },
     );
     completedScenarios.push("popup dismissal avoids locale-switch controls");
+
+    await runScenario(
+      "clear_overlays falls back to popup dismissal for centered dialogs",
+      async () => {
+        await withTab(`${harness.baseUrl}/language-popup`, async (tab) => {
+          const wc = tab.view.webContents;
+
+          const result = await clearOverlays(wc);
+          const modalExists = await wc.executeJavaScript(
+            "Boolean(document.getElementById('language-modal'))",
+          );
+          const lang = await wc.executeJavaScript(
+            "document.documentElement.lang",
+          );
+
+          assert.doesNotMatch(result, /extractContent is not defined/);
+          assert.equal(modalExists, false);
+          assert.equal(lang, "en");
+        });
+      },
+    );
+    completedScenarios.push(
+      "clear_overlays falls back to popup dismissal for centered dialogs",
+    );
 
     console.log(
       `\nNavigation regression suite passed against ${harness.baseUrl}\nScenarios: ${completedScenarios.join("; ")}`,
