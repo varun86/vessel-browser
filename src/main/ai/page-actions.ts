@@ -1715,14 +1715,21 @@ async function tryDismissConsentIframe(wc: WebContents): Promise<string | null> 
   return null;
 }
 
+type QuickCookieDismissResult =
+  | { status: "dismissed"; message: string }
+  | { status: "still_visible"; message: string };
+
 async function tryAcceptCookiesQuickly(
   wc: WebContents,
-): Promise<string | typeof PAGE_SCRIPT_TIMEOUT | null> {
-  const dismissed = await executePageScript<string | null>(
+): Promise<QuickCookieDismissResult | typeof PAGE_SCRIPT_TIMEOUT | null> {
+  const dismissed = await executePageScript<QuickCookieDismissResult | null>(
     wc,
     `
-      (function() {
-        var selectors = [
+      (async function() {
+        var delay = function(ms) {
+          return new Promise(function(resolve) { setTimeout(resolve, ms); });
+        };
+        var selectorTargets = [
           '#onetrust-accept-btn-handler',
           '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
           '[data-cookiefirst-action="accept"]',
@@ -1742,51 +1749,230 @@ async function tryAcceptCookiesQuickly(
           '.message-component.message-button.no-children.focusable.sp_choice_type_11',
           '[class*="truste"] [class*="accept"]',
           '[id*="consent-accept"]',
-          '[class*="cmp-accept"]',
+          '[class*="cmp-accept"]'
         ];
-        var textPatterns = [
-          'accept all',
-          'accept cookies',
-          'allow all',
-          'allow cookies',
-          'agree',
-          'got it',
-          'ok',
-          'i agree',
-          'i accept',
-          'consent',
-          'continue',
-          'accept and continue',
-          'accept & continue'
+        var surfaceSelectors = [
+          '#onetrust-consent-sdk',
+          '#CybotCookiebotDialog',
+          '[id*="cookie" i]',
+          '[id*="consent" i]',
+          '[id*="cmp" i]',
+          '[id*="sp_message" i]',
+          '[class*="cookie" i]',
+          '[class*="consent" i]',
+          '[class*="cmp" i]',
+          '[class*="sp_message" i]',
+          '[class*="truste" i]',
+          '[class*="didomi" i]',
+          '[data-testid*="cookie" i]',
+          '[data-testid*="consent" i]',
+          '[aria-label*="cookie" i]',
+          '[aria-label*="consent" i]',
+          '.fc-consent-root'
         ];
-        for (var i = 0; i < selectors.length; i++) {
-          var el = document.querySelector(selectors[i]);
-          if (el && el instanceof HTMLElement) {
-            el.click();
-            return "Dismissed cookie banner via: " + selectors[i];
-          }
+        var actionSelector = [
+          'button',
+          '[role="button"]',
+          'a[role="button"]',
+          'a.message-component',
+          'input[type="button"]',
+          'input[type="submit"]'
+        ].join(',');
+        var seen = [];
+
+        function normalize(text) {
+          return String(text || '').replace(/\\s+/g, ' ').trim();
         }
-        var buttons = document.querySelectorAll('button, a[role="button"], [type="submit"]');
-        for (var j = 0; j < buttons.length; j++) {
-          var btn = buttons[j];
-          var text = (btn.textContent || '').trim().toLowerCase();
-          for (var k = 0; k < textPatterns.length; k++) {
-            if (text === textPatterns[k] || text.startsWith(textPatterns[k])) {
-              btn.click();
-              return "Dismissed cookie banner via text match: " + text;
+
+        function lower(text) {
+          return normalize(text).toLowerCase();
+        }
+
+        function isElementVisible(el) {
+          if (!(el instanceof HTMLElement)) return false;
+          var style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden') return false;
+          if (Number(style.opacity || '1') < 0.05) return false;
+          var rect = el.getBoundingClientRect();
+          return rect.width > 2 &&
+            rect.height > 2 &&
+            rect.bottom > 0 &&
+            rect.right > 0 &&
+            rect.top < window.innerHeight &&
+            rect.left < window.innerWidth;
+        }
+
+        function elementText(el) {
+          if (!(el instanceof HTMLElement)) return '';
+          return normalize([
+            el.getAttribute('aria-label'),
+            el.getAttribute('title'),
+            el.getAttribute('value'),
+            el.textContent
+          ].filter(Boolean).join(' '));
+        }
+
+        function looksLikeCookieSurface(el) {
+          if (!isElementVisible(el)) return false;
+          var text = lower([
+            el.getAttribute('aria-label'),
+            el.getAttribute('id'),
+            el.getAttribute('class'),
+            el.textContent
+          ].filter(Boolean).join(' ')).slice(0, 1600);
+          if (!/(cookie|consent|privacy|tracking|personalise|personalize|advertis|data choices|your choices|cmp|onetrust|truste|didomi)/.test(text)) {
+            return false;
+          }
+
+          var rect = el.getBoundingClientRect();
+          var style = window.getComputedStyle(el);
+          var fixedLike = style.position === 'fixed' || style.position === 'sticky';
+          var sizeable = rect.width >= Math.min(window.innerWidth * 0.35, 360) && rect.height >= 48;
+          var bottomBanner = fixedLike && rect.bottom > window.innerHeight * 0.58 && rect.height >= 64;
+          var dialog = el.getAttribute('role') === 'dialog' || el.getAttribute('aria-modal') === 'true';
+          var namedSurface = /(cookie|consent|cmp|onetrust|truste|didomi|sp_message)/.test(lower([
+            el.getAttribute('id'),
+            el.getAttribute('class'),
+            el.getAttribute('data-testid')
+          ].filter(Boolean).join(' ')));
+
+          return sizeable && (namedSurface || bottomBanner || dialog);
+        }
+
+        function cookieSurfaces() {
+          var surfaces = [];
+          function addSurface(el) {
+            if (surfaces.indexOf(el) === -1 && looksLikeCookieSurface(el)) {
+              surfaces.push(el);
             }
           }
+
+          for (var i = 0; i < surfaceSelectors.length; i++) {
+            try {
+              document.querySelectorAll(surfaceSelectors[i]).forEach(addSurface);
+            } catch {
+              // Ignore unsupported selectors in older page engines.
+            }
+          }
+
+          document.querySelectorAll('div, section, aside, footer, form, [role="dialog"]').forEach(function(el) {
+            if (!(el instanceof HTMLElement)) return;
+            var style = window.getComputedStyle(el);
+            if (style.position === 'fixed' || style.position === 'sticky' || el.getAttribute('role') === 'dialog') {
+              addSurface(el);
+            }
+          });
+
+          return surfaces;
         }
+
+        function hasCookieSurface() {
+          return cookieSurfaces().length > 0;
+        }
+
+        function labelScore(label) {
+          var text = lower(label);
+          if (!text) return 0;
+          if (/^(accept all|accept cookies|allow all|allow cookies|accept and continue|accept & continue|agree and continue)$/.test(text)) {
+            return 220;
+          }
+          if (/^(i agree|i accept|agree|accept|allow|ok|okay|got it|continue|yes)$/.test(text)) {
+            return 190;
+          }
+          if (/^(reject all|decline|deny|necessary only|essential only|save preferences|confirm choices|submit preferences)$/.test(text)) {
+            return 170;
+          }
+          if (/\\b(accept all|allow all|accept cookies|allow cookies|accept and continue|accept & continue|agree and continue)\\b/.test(text)) {
+            return 160;
+          }
+          if (/\\b(reject all|save preferences|confirm choices|necessary only|essential only)\\b/.test(text)) {
+            return 145;
+          }
+          if (/^(consent|cookie consent|cookies|privacy|privacy policy|cookie policy|learn more|more information|settings|preferences|manage options|customize|customise)$/.test(text)) {
+            return 0;
+          }
+          return 0;
+        }
+
+        function addCandidate(el, source, baseScore) {
+          if (!(el instanceof HTMLElement) || seen.indexOf(el) !== -1 || !isElementVisible(el)) return;
+          var label = elementText(el);
+          var score = labelScore(label);
+          if (score <= 0 && baseScore < 160) return;
+          seen.push(el);
+          candidates.push({
+            el: el,
+            label: label || source,
+            source: source,
+            score: baseScore + score
+          });
+        }
+
+        var beforeHadSurface = hasCookieSurface();
+        var candidates = [];
+
+        for (var i = 0; i < selectorTargets.length; i++) {
+          try {
+            document.querySelectorAll(selectorTargets[i]).forEach(function(el) {
+              addCandidate(el, selectorTargets[i], 160);
+            });
+          } catch {
+            // Ignore unsupported selectors in older page engines.
+          }
+        }
+
+        var surfaces = cookieSurfaces();
+        surfaces.forEach(function(surface) {
+          surface.querySelectorAll(actionSelector).forEach(function(el) {
+            addCandidate(el, 'cookie surface', 120);
+          });
+        });
+
+        if (beforeHadSurface) {
+          document.querySelectorAll(actionSelector).forEach(function(el) {
+            addCandidate(el, 'page action', 40);
+          });
+        }
+
+        candidates.sort(function(a, b) { return b.score - a.score; });
+
+        var tried = 0;
+        for (var j = 0; j < Math.min(candidates.length, 8); j++) {
+          var candidate = candidates[j];
+          tried += 1;
+          candidate.el.click();
+          await delay(220);
+          if (!hasCookieSurface()) {
+            return {
+              status: 'dismissed',
+              message: 'Dismissed cookie banner via: ' + candidate.label.slice(0, 80)
+            };
+          }
+        }
+
+        if (beforeHadSurface || tried > 0) {
+          return {
+            status: 'still_visible',
+            message: tried > 0
+              ? 'Cookie consent banner is still visible after trying ' + tried + ' candidate control(s). Try clear_overlays or dismiss_popup.'
+              : 'Cookie consent banner appears visible, but no reliable accept/reject button was found. Try clear_overlays or dismiss_popup.'
+          };
+        }
+
         return null;
       })()
     `,
     {
       label: "accept cookies",
-      timeoutMs: 1200,
+      timeoutMs: 2200,
+      userGesture: true,
     },
   );
   if (dismissed) return dismissed;
-  return tryDismissConsentIframe(wc);
+  const iframeDismissed = await tryDismissConsentIframe(wc);
+  return iframeDismissed
+    ? { status: "dismissed", message: iframeDismissed }
+    : null;
 }
 
 export async function clearOverlays(
@@ -1797,9 +1983,9 @@ export async function clearOverlays(
   if (quickCookieResult === PAGE_SCRIPT_TIMEOUT) {
     return pageBusyError("clear_overlays");
   }
-  if (quickCookieResult) {
+  if (quickCookieResult?.status === "dismissed") {
     return [
-      quickCookieResult,
+      quickCookieResult.message,
       "Stopped after a lightweight consent pass to keep the page responsive. Re-run only if the banner is still blocking the page.",
     ].join("\n");
   }
@@ -4705,7 +4891,7 @@ export async function executeAction(
           if (dismissed === PAGE_SCRIPT_TIMEOUT) {
             return pageBusyError("accept_cookies");
           }
-          if (dismissed) return dismissed;
+          if (dismissed) return dismissed.message;
 
           return "No cookie consent banner detected. Try dismiss_popup for other overlays.";
         }

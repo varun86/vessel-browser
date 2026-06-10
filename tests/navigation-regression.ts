@@ -1050,6 +1050,35 @@ async function main(): Promise<void> {
       "clear_overlays falls back to popup dismissal for centered dialogs",
     );
 
+    await runScenario(
+      "accept_cookies verifies ambiguous consent banners are actually dismissed",
+      async () => {
+        await withTab(`${harness.baseUrl}/cookie-banner-ambiguous`, async (tab) => {
+          const wc = tab.view.webContents;
+
+          const result = await executeAction(
+            "accept_cookies",
+            {},
+            buildActionContextForTab(tab),
+          );
+          const bannerExists = await wc.executeJavaScript(
+            "Boolean(document.getElementById('cookie-consent-banner'))",
+          );
+          const infoClicks = await wc.executeJavaScript(
+            "window.__consentInfoClicks || 0",
+          );
+
+          assert.match(result, /Dismissed cookie banner/);
+          assert.match(result, /Accept all/i);
+          assert.equal(bannerExists, false);
+          assert.equal(infoClicks, 0);
+        });
+      },
+    );
+    completedScenarios.push(
+      "accept_cookies verifies ambiguous consent banners are actually dismissed",
+    );
+
     console.log(
       `\nNavigation regression suite passed against ${harness.baseUrl}\nScenarios: ${completedScenarios.join("; ")}`,
     );

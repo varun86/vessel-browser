@@ -35,6 +35,7 @@ function renderPage(title: string, body: string): string {
       <a href="/article-summary">Article summary</a>
       <a href="/search-no-shortcut">Search no shortcut</a>
       <a href="/language-popup">Language popup</a>
+      <a href="/cookie-banner-ambiguous">Cookie banner</a>
     </nav>
     <main>
       ${body}
@@ -909,6 +910,44 @@ export async function createNavigationHarnessServer(): Promise<NavigationHarness
                 </button>
               </div>
             </section>
+          `,
+        ),
+      );
+      return;
+    }
+
+    if (method === "GET" && url.pathname === "/cookie-banner-ambiguous") {
+      sendHtml(
+        res,
+        renderPage(
+          "cookie-banner-ambiguous",
+          `
+            <h1>Cookie Banner</h1>
+            <p>The visible consent link should not be mistaken for a dismiss action.</p>
+            <aside
+              id="cookie-consent-banner"
+              class="cookie-consent-banner"
+              role="dialog"
+              aria-label="Cookie consent"
+              style="position: fixed; left: 0; right: 0; bottom: 0; min-height: 220px; padding: 24px; background: white; border-top: 1px solid #ccc; box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18); z-index: 100;"
+            >
+              <h2>Cookie consent</h2>
+              <p>We use cookies for analytics and personalised advertising.</p>
+              <button
+                id="consent-info"
+                type="button"
+                onclick="window.__consentInfoClicks = (window.__consentInfoClicks || 0) + 1;"
+              >
+                Consent
+              </button>
+              <button
+                id="accept-all-cookies"
+                type="button"
+                onclick="document.getElementById('cookie-consent-banner').remove();"
+              >
+                Accept all
+              </button>
+            </aside>
           `,
         ),
       );
