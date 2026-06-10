@@ -2033,6 +2033,99 @@
     text-overflow: ellipsis;
 }
 
+.chat-command-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 10px 14px 0;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--status-warning) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--status-warning) 25%, transparent);
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.chat-command-error-dismiss {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.chat-command-error-dismiss:hover {
+    color: var(--text-primary);
+}
+
+.chat-skill-suggestions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 10px 14px 0;
+    padding: 5px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-glass);
+    background: var(--surface-elevated);
+    box-shadow: var(--shadow-lg);
+}
+
+.chat-skill-suggestion {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-height: 40px;
+    padding: 7px 8px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    text-align: left;
+    transition:
+        background var(--duration-fast) var(--ease-in-out),
+        color var(--duration-fast) var(--ease-in-out);
+}
+
+.chat-skill-suggestion:hover,
+.chat-skill-suggestion.active {
+    color: var(--text-primary);
+    background: var(--surface-hover);
+}
+
+.chat-skill-suggestion-command {
+    flex-shrink: 0;
+    min-width: 86px;
+    max-width: 118px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    color: var(--accent-primary);
+}
+
+.chat-skill-suggestion-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 1px;
+}
+
+.chat-skill-suggestion-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: inherit;
+}
+
+.chat-skill-suggestion-desc {
+    font-size: 10px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .sidebar-input {
     flex: 1;
     background: var(--bg-tertiary);
