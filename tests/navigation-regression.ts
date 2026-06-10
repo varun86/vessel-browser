@@ -937,6 +937,26 @@ async function main(): Promise<void> {
     );
 
     await runScenario(
+      "read_page summary uses fast article text before heavy extraction",
+      async () => {
+        await withTab(`${harness.baseUrl}/article-summary`, async (tab) => {
+          const result = await executeAction(
+            "read_page",
+            { mode: "summary" },
+            buildActionContextForTab(tab),
+          );
+
+          assert.match(result, /\[read_page mode=summary — fast article text/);
+          assert.match(result, /Artificial intelligence is a field/);
+          assert.match(result, /Researchers study reliability/);
+        });
+      },
+    );
+    completedScenarios.push(
+      "read_page summary uses fast article text before heavy extraction",
+    );
+
+    await runScenario(
       "search prefers the visible desktop search box and nearby button",
       async () => {
         await withTab(`${harness.baseUrl}/search-visibility`, async (tab) => {

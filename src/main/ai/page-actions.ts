@@ -82,6 +82,7 @@ import {
   type FillFormFieldResult,
 } from "./page-actions/core";
 import {
+  fastArticleTextExtract,
   glanceExtract,
   normalizeReadPageMode,
   getPostNavSummary,
@@ -3801,6 +3802,23 @@ export async function executeAction(
 
           if (requestedGlance) {
             return glanceExtract(wc);
+          }
+
+          const requestedTextMode =
+            typeof args.mode === "string"
+              ? args.mode.trim().toLowerCase()
+              : "";
+          if (
+            requestedTextMode === "summary" ||
+            requestedTextMode === "text_only"
+          ) {
+            const fastArticleText = await fastArticleTextExtract(
+              wc,
+              requestedTextMode,
+            );
+            if (fastArticleText) {
+              return fastArticleText;
+            }
           }
 
           // Try full extraction first; if the page JS thread is busy

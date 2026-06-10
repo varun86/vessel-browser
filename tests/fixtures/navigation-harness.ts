@@ -32,6 +32,7 @@ function renderPage(title: string, body: string): string {
       <a href="/trusted-enter-source">Trusted Enter</a>
       <a href="/search-visibility">Search visibility</a>
       <a href="/focused-search">Focused search</a>
+      <a href="/article-summary">Article summary</a>
       <a href="/search-no-shortcut">Search no shortcut</a>
       <a href="/language-popup">Language popup</a>
     </nav>
@@ -772,6 +773,28 @@ export async function createNavigationHarnessServer(): Promise<NavigationHarness
                 document.getElementById('focused-search-input')?.focus();
               });
             </script>
+          `,
+        ),
+      );
+      return;
+    }
+
+    if (method === "GET" && url.pathname === "/article-summary") {
+      sendHtml(
+        res,
+        renderPage(
+          "article-summary",
+          `
+            <main>
+              <article>
+                <h1>Artificial intelligence</h1>
+                <p>Artificial intelligence is a field of computer science focused on systems that can perform tasks associated with human intelligence, including reasoning, learning, planning, perception, and language use.</p>
+                <h2>Applications</h2>
+                <p>AI systems are used in search engines, recommendation systems, speech recognition, medical analysis, robotics, software development, and many other areas where pattern recognition and decision support are useful.</p>
+                <h2>Research challenges</h2>
+                <p>Researchers study reliability, interpretability, alignment, robustness, and social impacts so that increasingly capable systems can be evaluated and deployed responsibly.</p>
+              </article>
+            </main>
           `,
         ),
       );
