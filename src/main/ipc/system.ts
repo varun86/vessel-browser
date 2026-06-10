@@ -35,6 +35,7 @@ import {
   uninstallKit,
 } from "../automation/kit-registry";
 import { getScheduledKitIds } from "../automation/scheduler";
+import { assertFeatureUnlocked } from "../premium/manager";
 
 const KitIdSchema = z.string().min(1);
 const OriginSchema = z.string().min(1);
@@ -62,16 +63,19 @@ export function registerSystemHandlers(
 
   ipcMain.handle(Channels.AUTOMATION_GET_INSTALLED, async (event) => {
     assertTrustedIpcSender(event);
+    assertFeatureUnlocked("automation_kits", "Automation kit access");
     return await getInstalledKits();
   });
 
   ipcMain.handle(Channels.AUTOMATION_INSTALL_FROM_FILE, async (event) => {
     assertTrustedIpcSender(event);
+    assertFeatureUnlocked("automation_kits", "Automation kit access");
     return await installKitFromFile();
   });
 
   ipcMain.handle(Channels.AUTOMATION_UNINSTALL, async (event, id: unknown) => {
     assertTrustedIpcSender(event);
+    assertFeatureUnlocked("automation_kits", "Automation kit access");
     return await uninstallKit(
       parseIpc(KitIdSchema, id, "id"),
       getScheduledKitIds(),

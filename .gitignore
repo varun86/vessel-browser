@@ -29,6 +29,7 @@ tmp/
 .agents/
 .gitnexus
 .security-audit-ignore
+*.hermes/*
 
 # Superpowers (local brainstorm state)
 .superpowers/
