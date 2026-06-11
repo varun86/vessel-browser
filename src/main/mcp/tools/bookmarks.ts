@@ -6,8 +6,7 @@ import {
   describeFolder,
   resolveBookmarkFolderTarget,
 } from "../../ai/page-bookmarks";
-// eslint-disable-next-line no-restricted-syntax -- getBookmarkMetadataFromArgs is defined in page-actions.ts itself; not yet extracted to a sub-module
-import { getBookmarkMetadataFromArgs } from "../../ai/page-actions";
+import { getBookmarkMetadataFromArgs } from "../../ai/page-actions/bookmark-metadata";
 import { resolveBookmarkSourceDraft } from "../../bookmarks/page-source";
 import {
   formatDeadLinkMessage,

@@ -15,6 +15,8 @@ import {
   logger,
 } from "./core";
 import { sleep, waitForLoad } from "../../utils/webcontents-utils";
+import { clickElement } from "./click-targets";
+import { clickResolvedSelector } from "./navigation";
 
 async function getLocaleSnapshot(
   wc: WebContents,
@@ -698,7 +700,7 @@ function describeOverlayState(
  * executeJavaScript only runs in the main frame, so we iterate over all
  * child frames looking for accept/dismiss buttons.
  */
-async function tryDismissConsentIframe(wc: WebContents): Promise<string | null> {
+export async function tryDismissConsentIframe(wc: WebContents): Promise<string | null> {
   try {
     // Check if body is scroll-locked or a consent container is visible — if not, skip
     const hasSignal = await executePageScript<boolean>(
@@ -775,7 +777,7 @@ type QuickCookieDismissResult =
   | { status: "dismissed"; message: string }
   | { status: "still_visible"; message: string };
 
-async function tryAcceptCookiesQuickly(
+export async function tryAcceptCookiesQuickly(
   wc: WebContents,
 ): Promise<QuickCookieDismissResult | typeof PAGE_SCRIPT_TIMEOUT | null> {
   const dismissed = await executePageScript<QuickCookieDismissResult | null>(
@@ -1152,4 +1154,30 @@ export async function clearOverlaysWithHandlers(
   }
 
   return steps.join("\n");
+}
+
+async function clickOverlayCandidate(
+  wc: WebContents,
+  action?: {
+    label?: string;
+    selector?: string;
+  },
+): Promise<string | null> {
+  if (!action?.selector) return null;
+  const result = await clickResolvedSelector(wc, action.selector);
+  return `${action.label || action.selector}: ${result}`;
+}
+
+export async function dismissPopup(wc: WebContents): Promise<string> {
+  return dismissPopupWithClick(wc, clickElement);
+}
+
+export async function clearOverlays(
+  wc: WebContents,
+  strategy: "auto" | "interactive" = "auto",
+): Promise<string> {
+  return clearOverlaysWithHandlers(wc, strategy, {
+    clickOverlayCandidate,
+    dismissPopup,
+  });
 }

@@ -14,8 +14,8 @@ import { buildCompactScopedContext } from "./compact-context";
 import { extractContent } from "../content/extractor";
 import { AGENT_TOOLS } from "./tools";
 import { pruneToolsForContext } from "../tools/pruner";
-// eslint-disable-next-line no-restricted-syntax -- executeAction + clearCartState are defined in page-actions.ts itself; not yet extracted to sub-modules
-import { executeAction, type ActionContext, clearCartState } from "./page-actions";
+import { executeAction, type ActionContext } from "./page-actions/orchestrator";
+import { clearCartState } from "./page-actions/orchestrator";
 import type { TabManager } from "../tabs/tab-manager";
 import type { WebContents } from "electron";
 import type { AgentRuntime } from "../agent/runtime";

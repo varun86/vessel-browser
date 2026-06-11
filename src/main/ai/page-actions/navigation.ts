@@ -11,9 +11,41 @@ import {
   normalizeSearchQuery,
 } from "../page-search";
 import { getPostSearchSummary } from "./summaries";
-import { executePageScript, loadPermittedUrl, PAGE_SCRIPT_TIMEOUT, pageBusyError } from "./core";
+import {
+  executePageScript,
+  loadPermittedUrl,
+  logger,
+  PAGE_SCRIPT_TIMEOUT,
+  pageBusyError,
+} from "./core";
 import { pressKey, setElementValue } from "./interaction";
-import { sleep, waitForPotentialNavigation } from "../../utils/webcontents-utils";
+import {
+  sleep,
+  waitForLoad,
+  waitForPotentialNavigation,
+} from "../../utils/webcontents-utils";
+import {
+  formatDeadLinkMessage,
+  validateLinkDestination,
+} from "../../network/link-validation";
+import {
+  getCartAddedSummary,
+  hasRecentCartClick,
+  isAddToCartText,
+  isDuplicateCartClick,
+  isProductAlreadyInCart,
+  recordCartClick,
+} from "../cart-click-state";
+import {
+  buildCartSuccessSuffix,
+  detectPostClickOverlay,
+  getCartDialogActions,
+} from "./overlays";
+import {
+  activateElement,
+  clickElement,
+  describeElementForClick,
+} from "./click-targets";
 
 export {
   buildCommonSearchUrlShortcut,
@@ -58,6 +90,325 @@ export function findCheckpoint(
   }
 
   return null;
+}
+
+export async function scrollPage(
+  wc: WebContents,
+  deltaY: number,
+): Promise<{
+  beforeY: number;
+  afterY: number;
+  movedY: number;
+}> {
+  const getScrollY = async () => {
+    const scrollY = await executePageScript<number>(
+      wc,
+      `
+      (function() {
+        return Math.max(
+          window.scrollY || 0,
+          window.pageYOffset || 0,
+          document.scrollingElement?.scrollTop || 0,
+          document.documentElement?.scrollTop || 0,
+          document.body?.scrollTop || 0,
+        );
+      })()
+    `,
+      {
+        label: "read scroll position",
+      },
+    );
+    return typeof scrollY === "number" ? scrollY : 0;
+  };
+
+  const beforeY = await getScrollY();
+  const scrolled = await executePageScript(
+    wc,
+    `window.scrollBy(0, ${deltaY})`,
+    {
+      label: "scroll page",
+    },
+  );
+  if (scrolled === PAGE_SCRIPT_TIMEOUT) {
+    return {
+      beforeY,
+      afterY: beforeY,
+      movedY: 0,
+    };
+  }
+  await sleep(100);
+  const afterY = await getScrollY();
+  return {
+    beforeY,
+    afterY,
+    movedY: Math.round(afterY - beforeY),
+  };
+}
+
+async function followHrefFromClickResult(
+  wc: WebContents,
+  beforeUrl: string,
+  result: unknown,
+  logMessage: string,
+): Promise<string | null> {
+  const hrefMatch =
+    typeof result === "string" ? result.match(/\nhref: (https?:\/\/\S+)/) : null;
+  if (!hrefMatch) return null;
+
+  try {
+    await loadPermittedUrl(wc, hrefMatch[1]);
+    await waitForLoad(wc, 8000);
+    const hrefUrl = wc.getURL();
+    if (hrefUrl !== beforeUrl) return `${result.split("\n")[0]} -> ${hrefUrl}`;
+  } catch (err) {
+    logger.warn(logMessage, err);
+  }
+
+  return null;
+}
+
+export async function clickResolvedSelector(
+  wc: WebContents,
+  selector: string,
+): Promise<string> {
+  if (selector.startsWith("__vessel_idx:")) {
+    const idx = Number(selector.slice("__vessel_idx:".length));
+    const beforeUrl = wc.getURL();
+    let idxCartMatch = false;
+    const idxLabel = await executePageScript<string>(
+      wc,
+      `window.__vessel?.getElementText?.(${idx}) || ""`,
+      { label: "shadow element text" },
+    );
+    if (
+      typeof idxLabel === "string" &&
+      (idxCartMatch = isAddToCartText(idxLabel)) &&
+      isDuplicateCartClick(beforeUrl, idxLabel)
+    ) {
+      return `Blocked: "${idxLabel}" was already clicked on this page. The item is in your cart. Call read_page to see available actions (e.g. View Cart, Continue Shopping).`;
+    }
+    if (idxCartMatch && isProductAlreadyInCart(beforeUrl)) {
+      const summary = getCartAddedSummary(beforeUrl);
+      return `Blocked: This product was already added to the cart.${summary}\nGo back and select a different product.`;
+    }
+    const result = await executePageScript<string>(
+      wc,
+      `window.__vessel?.interactByIndex?.(${idx}, "click") || "Error: interactByIndex not available"`,
+      {
+        label: "shadow click by index",
+      },
+    );
+    if (result === PAGE_SCRIPT_TIMEOUT) return pageBusyError("click");
+    if (typeof result === "string" && result.startsWith("Error")) return result;
+    if (idxCartMatch) {
+      recordCartClick(beforeUrl);
+    }
+    await waitForPotentialNavigation(wc, beforeUrl);
+    const afterUrl = wc.getURL();
+    if (afterUrl !== beforeUrl) return `${result} -> ${afterUrl}`;
+    let idxOverlay = await detectPostClickOverlay(wc);
+    if (!idxOverlay && idxCartMatch) {
+      await sleep(1200);
+      idxOverlay = await detectPostClickOverlay(wc);
+    }
+    if (idxCartMatch) {
+      return `${result}${await buildCartSuccessSuffix(wc, beforeUrl, idxOverlay)}`;
+    }
+    if (!idxOverlay) {
+      const hrefFallback = await followHrefFromClickResult(
+        wc,
+        beforeUrl,
+        result,
+        "Failed to follow href fallback after click:",
+      );
+      if (hrefFallback) return hrefFallback;
+    }
+    return idxOverlay
+      ? `${result}\n${idxOverlay}`
+      : `${result}\nNote: Page did not change after click.`;
+  }
+
+  if (selector.includes(" >>> ")) {
+    const beforeUrl = wc.getURL();
+    let shadowCartMatch = false;
+    const shadowLabel = await executePageScript<string>(
+      wc,
+      `(function() {
+        var el = window.__vessel?.resolveShadowSelector?.(${JSON.stringify(selector)});
+        return el ? (el.getAttribute("aria-label") || el.textContent?.trim().slice(0, 60) || "") : "";
+      })()`,
+      { label: "shadow element text" },
+    );
+    if (
+      typeof shadowLabel === "string" &&
+      (shadowCartMatch = isAddToCartText(shadowLabel)) &&
+      isDuplicateCartClick(beforeUrl, shadowLabel)
+    ) {
+      return `Blocked: "${shadowLabel}" was already clicked on this page. The item is in your cart. Call read_page to see available actions (e.g. View Cart, Continue Shopping).`;
+    }
+    if (shadowCartMatch && isProductAlreadyInCart(beforeUrl)) {
+      const summary = getCartAddedSummary(beforeUrl);
+      return `Blocked: This product was already added to the cart.${summary}\nGo back and select a different product.`;
+    }
+    const result = await executePageScript<string>(
+      wc,
+      `
+      (function() {
+        var el = window.__vessel?.resolveShadowSelector?.(${JSON.stringify(selector)});
+        if (!el || !document.contains(el)) return "Error[stale-index]: Shadow DOM element not found — call read_page to refresh.";
+        if (el instanceof HTMLElement) { el.focus(); el.click(); }
+        var anchor = el instanceof HTMLAnchorElement ? el : el.closest('a[href]');
+        var href = anchor instanceof HTMLAnchorElement ? anchor.href : null;
+        return "Clicked: " + (el.getAttribute("aria-label") || el.textContent?.trim().slice(0, 60) || el.tagName.toLowerCase()) + (href ? "\\nhref: " + href : "");
+      })()
+    `,
+      {
+        label: "shadow click selector",
+      },
+    );
+    if (result === PAGE_SCRIPT_TIMEOUT) return pageBusyError("click");
+    if (typeof result === "string" && result.startsWith("Error")) return result;
+    if (shadowCartMatch) {
+      recordCartClick(beforeUrl);
+    }
+    await waitForPotentialNavigation(wc, beforeUrl);
+    const afterUrl = wc.getURL();
+    if (afterUrl !== beforeUrl) return `${result} -> ${afterUrl}`;
+    let shadowOverlay = await detectPostClickOverlay(wc);
+    if (!shadowOverlay && shadowCartMatch) {
+      await sleep(1200);
+      shadowOverlay = await detectPostClickOverlay(wc);
+    }
+    if (shadowCartMatch) {
+      return `${result}${await buildCartSuccessSuffix(wc, beforeUrl, shadowOverlay)}`;
+    }
+    if (!shadowOverlay) {
+      const hrefFallback = await followHrefFromClickResult(
+        wc,
+        beforeUrl,
+        result,
+        "Failed to follow href fallback after shadow click:",
+      );
+      if (hrefFallback) return hrefFallback;
+    }
+    return shadowOverlay
+      ? `${result}\n${shadowOverlay}`
+      : `${result}\nNote: Page did not change after click.`;
+  }
+
+  const beforeUrl = wc.getURL();
+  const elInfo = await describeElementForClick(wc, selector);
+  if ("error" in elInfo) return `Error: ${elInfo.error}`;
+
+  const cartMatch = isAddToCartText(elInfo.text);
+  if (cartMatch && isDuplicateCartClick(beforeUrl, elInfo.text)) {
+    return `Blocked: "${elInfo.text}" was already clicked on this page. The item is in your cart. Call read_page to see available actions (e.g. View Cart, Continue Shopping).`;
+  }
+
+  if (!cartMatch && hasRecentCartClick(beforeUrl)) {
+    const dialogActions = await getCartDialogActions(wc);
+    if (dialogActions) {
+      return `Blocked: a cart confirmation dialog is open. Do not click background elements.\n${dialogActions}\nClick one of these dialog actions instead.`;
+    }
+  }
+
+  if (elInfo.href) {
+    const validation = await validateLinkDestination(elInfo.href);
+    if (validation.status === "dead") {
+      return formatDeadLinkMessage(elInfo.text, validation);
+    }
+  }
+
+  if (cartMatch && isProductAlreadyInCart(beforeUrl)) {
+    const summary = getCartAddedSummary(beforeUrl);
+    return `Blocked: This product was already added to the cart.${summary}\nGo back and select a different product.`;
+  }
+
+  if (cartMatch) {
+    recordCartClick(beforeUrl);
+  }
+
+  const tagLabel = elInfo.tag && elInfo.tag !== "a" && elInfo.tag !== "button"
+    ? ` <${elInfo.tag}>`
+    : "";
+  const clickText = `Clicked: ${elInfo.text}${tagLabel}`;
+  const clickResult = await clickElement(wc, selector);
+  if (clickResult.startsWith("Error:")) return clickResult;
+
+  await waitForPotentialNavigation(wc, beforeUrl);
+  const afterUrl = wc.getURL();
+  if (afterUrl !== beforeUrl) {
+    return `${clickText} -> ${afterUrl}`;
+  }
+
+  const overlayHint = await detectPostClickOverlay(wc);
+  if (overlayHint) {
+    if (cartMatch) {
+      return `${clickText} (${clickResult})${await buildCartSuccessSuffix(
+        wc,
+        beforeUrl,
+        overlayHint,
+      )}`;
+    }
+    return `${clickText} (${clickResult})\n${overlayHint}`;
+  }
+
+  if (cartMatch) {
+    await sleep(1200);
+    const delayedOverlayHint = await detectPostClickOverlay(wc);
+    if (delayedOverlayHint) {
+      return `${clickText} (${clickResult})${await buildCartSuccessSuffix(
+        wc,
+        beforeUrl,
+        delayedOverlayHint,
+      )}`;
+    }
+    return `${clickText} (${clickResult})${await buildCartSuccessSuffix(
+      wc,
+      beforeUrl,
+    )}`;
+  }
+
+  const activationResult = await activateElement(wc, selector);
+  if (!activationResult.startsWith("Error:")) {
+    await waitForPotentialNavigation(wc, beforeUrl);
+    const fallbackUrl = wc.getURL();
+    if (fallbackUrl !== beforeUrl) {
+      return `${clickText} -> ${fallbackUrl} (recovered via DOM activation)`;
+    }
+  }
+
+  const postActivationOverlayHint = await detectPostClickOverlay(wc);
+  if (postActivationOverlayHint) {
+    return `${clickText} (${clickResult})\n${postActivationOverlayHint}`;
+  }
+
+  const sameTabLinkTarget =
+    typeof elInfo.href === "string" &&
+    elInfo.href.trim().length > 0 &&
+    (!elInfo.target || !/^_blank$/i.test(elInfo.target.trim()));
+  if (sameTabLinkTarget) {
+    const validation = await validateLinkDestination(elInfo.href!);
+    if (validation.status !== "dead") {
+      try {
+        await loadPermittedUrl(wc, elInfo.href!);
+        await waitForLoad(wc, 8000);
+        const hrefFallbackUrl = wc.getURL();
+        if (hrefFallbackUrl !== beforeUrl) {
+          return `${clickText} -> ${hrefFallbackUrl} (recovered via href fallback)`;
+        }
+      } catch (err) {
+        logger.warn("Failed href fallback after click, returning generic click result:", err);
+      }
+    }
+  }
+
+  const nonInteractiveWarning =
+    elInfo.isInteractive === false && !elInfo.href
+      ? `\nNote: The clicked element (<${elInfo.tag || "unknown"}>) is not a link or button. Nothing happened. Try clicking the actual link element nearby or use read_page to find the correct interactive element.`
+      : `\nNote: Page did not change after click. The element may need a different interaction method. Consider read_page or inspect_element.`;
+
+  return `${clickText} (${clickResult})${nonInteractiveWarning}`;
 }
 
 type SearchTargetInfo = {
@@ -460,4 +811,18 @@ export async function searchPageWithClick(
   }
 
   return `Searched "${query}" (same page — results may have loaded dynamically)${await getPostSearchSummary(wc)}`;
+}
+
+export async function clickElementBySelector(
+  wc: WebContents,
+  selector: string,
+): Promise<string> {
+  return clickResolvedSelector(wc, selector);
+}
+
+export async function searchPage(
+  wc: WebContents,
+  args: Record<string, unknown>,
+): Promise<string> {
+  return searchPageWithClick(wc, args, clickElementBySelector);
 }
