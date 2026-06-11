@@ -28,6 +28,16 @@ const customSkill: AutomationKit = {
   promptTemplate: "Research {{topic}}",
 };
 
+const instructionOnlySkill: AutomationKit = {
+  id: "summarize-page",
+  name: "Summarize Page",
+  description: "Summarize the active page",
+  category: "research",
+  icon: "FileText",
+  inputs: [],
+  promptTemplate: "Summarize the active page.",
+};
+
 test("isSafeAutomationKitId rejects path separators and null bytes", () => {
   assert.equal(isSafeAutomationKitId("custom-kit"), true);
   assert.equal(isSafeAutomationKitId("nested/kit"), false);
@@ -54,6 +64,10 @@ test("skill slash commands match skill ids and name slugs", () => {
     ])?.kit.id,
     customSkill.id,
   );
+  assert.deepEqual(
+    parseSkillSlashInvocation("/summarize-page", [instructionOnlySkill]),
+    { kit: instructionOnlySkill, task: "" },
+  );
   assert.equal(parseSkillSlashInvocation("/unknown compare", [customSkill]), null);
 });
 
@@ -64,6 +78,16 @@ test("buildSlashSkillValues fills a task-like required field", () => {
   );
 
   assert.deepEqual(values, { topic: "compare sources" });
+  assert.deepEqual(missingLabels, []);
+});
+
+test("buildSlashSkillValues allows instruction-only skills without task text", () => {
+  const { values, missingLabels } = buildSlashSkillValues(
+    instructionOnlySkill,
+    "",
+  );
+
+  assert.deepEqual(values, {});
   assert.deepEqual(missingLabels, []);
 });
 
