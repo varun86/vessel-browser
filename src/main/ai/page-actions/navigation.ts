@@ -19,15 +19,8 @@ import {
   pageBusyError,
 } from "./core";
 import { pressKey, setElementValue } from "./interaction";
-import {
-  sleep,
-  waitForLoad,
-  waitForPotentialNavigation,
-} from "../../utils/webcontents-utils";
-import {
-  formatDeadLinkMessage,
-  validateLinkDestination,
-} from "../../network/link-validation";
+import { sleep, waitForLoad, waitForPotentialNavigation } from "../../utils/webcontents-utils";
+import { formatDeadLinkMessage, validateLinkDestination } from "../../network/link-validation";
 import {
   getCartAddedSummary,
   hasRecentCartClick,
@@ -36,22 +29,10 @@ import {
   isProductAlreadyInCart,
   recordCartClick,
 } from "../cart-click-state";
-import {
-  buildCartSuccessSuffix,
-  detectPostClickOverlay,
-  getCartDialogActions,
-} from "./overlays";
-import {
-  activateElement,
-  clickElement,
-  describeElementForClick,
-} from "./click-targets";
+import { buildCartSuccessSuffix, detectPostClickOverlay, getCartDialogActions } from "./overlays";
+import { activateElement, clickElement, describeElementForClick } from "./click-targets";
 
-export {
-  buildCommonSearchUrlShortcut,
-  buildSearchShortcut,
-  normalizeSearchQuery,
-};
+export { buildCommonSearchUrlShortcut, buildSearchShortcut, normalizeSearchQuery };
 
 export function getTabByMatch(
   tabManager: TabManager,
@@ -64,8 +45,7 @@ export function getTabByMatch(
       .getAllStates()
       .find(
         (tab) =>
-          tab.title.toLowerCase().includes(lowered) ||
-          tab.url.toLowerCase().includes(lowered),
+          tab.title.toLowerCase().includes(lowered) || tab.url.toLowerCase().includes(lowered),
       ) || null
   );
 }
@@ -75,18 +55,12 @@ export function findCheckpoint(
   args: Record<string, unknown>,
 ): AgentCheckpoint | null {
   if (typeof args.checkpointId === "string" && args.checkpointId.trim()) {
-    return (
-      checkpoints.find((item) => item.id === args.checkpointId.trim()) || null
-    );
+    return checkpoints.find((item) => item.id === args.checkpointId.trim()) || null;
   }
 
   if (typeof args.name === "string" && args.name.trim()) {
     const lowered = args.name.trim().toLowerCase();
-    return (
-      [...checkpoints]
-        .reverse()
-        .find((item) => item.name.toLowerCase() === lowered) || null
-    );
+    return [...checkpoints].reverse().find((item) => item.name.toLowerCase() === lowered) || null;
   }
 
   return null;
@@ -122,13 +96,9 @@ export async function scrollPage(
   };
 
   const beforeY = await getScrollY();
-  const scrolled = await executePageScript(
-    wc,
-    `window.scrollBy(0, ${deltaY})`,
-    {
-      label: "scroll page",
-    },
-  );
+  const scrolled = await executePageScript(wc, `window.scrollBy(0, ${deltaY})`, {
+    label: "scroll page",
+  });
   if (scrolled === PAGE_SCRIPT_TIMEOUT) {
     return {
       beforeY,
@@ -151,8 +121,7 @@ async function followHrefFromClickResult(
   result: unknown,
   logMessage: string,
 ): Promise<string | null> {
-  const hrefMatch =
-    typeof result === "string" ? result.match(/\nhref: (https?:\/\/\S+)/) : null;
+  const hrefMatch = typeof result === "string" ? result.match(/\nhref: (https?:\/\/\S+)/) : null;
   if (!hrefMatch) return null;
 
   try {
@@ -167,10 +136,7 @@ async function followHrefFromClickResult(
   return null;
 }
 
-export async function clickResolvedSelector(
-  wc: WebContents,
-  selector: string,
-): Promise<string> {
+export async function clickResolvedSelector(wc: WebContents, selector: string): Promise<string> {
   if (selector.startsWith("__vessel_idx:")) {
     const idx = Number(selector.slice("__vessel_idx:".length));
     const beforeUrl = wc.getURL();
@@ -328,9 +294,8 @@ export async function clickResolvedSelector(
     recordCartClick(beforeUrl);
   }
 
-  const tagLabel = elInfo.tag && elInfo.tag !== "a" && elInfo.tag !== "button"
-    ? ` <${elInfo.tag}>`
-    : "";
+  const tagLabel =
+    elInfo.tag && elInfo.tag !== "a" && elInfo.tag !== "button" ? ` <${elInfo.tag}>` : "";
   const clickText = `Clicked: ${elInfo.text}${tagLabel}`;
   const clickResult = await clickElement(wc, selector);
   if (clickResult.startsWith("Error:")) return clickResult;
@@ -363,10 +328,7 @@ export async function clickResolvedSelector(
         delayedOverlayHint,
       )}`;
     }
-    return `${clickText} (${clickResult})${await buildCartSuccessSuffix(
-      wc,
-      beforeUrl,
-    )}`;
+    return `${clickText} (${clickResult})${await buildCartSuccessSuffix(wc, beforeUrl)}`;
   }
 
   const activationResult = await activateElement(wc, selector);
@@ -745,9 +707,7 @@ export async function searchPageWithClick(
     await waitForPotentialNavigation(wc, beforeUrl, 4000);
     const afterUrl = wc.getURL();
     const applied =
-      shortcut.appliedFilters.length > 0
-        ? ` (${shortcut.appliedFilters.join(", ")})`
-        : "";
+      shortcut.appliedFilters.length > 0 ? ` (${shortcut.appliedFilters.join(", ")})` : "";
     const destination = shortcut.section ? ` ${shortcut.section}` : "";
     return `Searched "${query}" via ${shortcut.source}${destination} shortcut${applied} → ${afterUrl}${await getPostSearchSummary(wc)}`;
   };
@@ -775,7 +735,7 @@ export async function searchPageWithClick(
         return runShortcut(fallback);
       }
     }
-    return "Error: Could not find a visible search input. Try read_page(mode=\"visible_only\") or provide a selector.";
+    return 'Error: Could not find a visible search input. Try read_page(mode="visible_only") or provide a selector.';
   }
 
   const fillResult = await setElementValue(wc, searchInfo.selector, query);
@@ -813,16 +773,10 @@ export async function searchPageWithClick(
   return `Searched "${query}" (same page — results may have loaded dynamically)${await getPostSearchSummary(wc)}`;
 }
 
-export async function clickElementBySelector(
-  wc: WebContents,
-  selector: string,
-): Promise<string> {
+export async function clickElementBySelector(wc: WebContents, selector: string): Promise<string> {
   return clickResolvedSelector(wc, selector);
 }
 
-export async function searchPage(
-  wc: WebContents,
-  args: Record<string, unknown>,
-): Promise<string> {
+export async function searchPage(wc: WebContents, args: Record<string, unknown>): Promise<string> {
   return searchPageWithClick(wc, args, clickElementBySelector);
 }

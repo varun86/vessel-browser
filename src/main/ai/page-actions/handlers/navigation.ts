@@ -1,6 +1,9 @@
 import type { ActionContext } from "../core";
 import { waitForLoad } from "../../../utils/webcontents-utils";
-import { isRedundantNavigateTarget, shouldBlockOffGoalDomainNavigation } from "../../tool-guardrails";
+import {
+  isRedundantNavigateTarget,
+  shouldBlockOffGoalDomainNavigation,
+} from "../../tool-guardrails";
 import { validateLinkDestination } from "../../../network/link-validation";
 import { getPostNavSummary } from "../summaries";
 
@@ -37,10 +40,7 @@ export async function handleNavigate(
   return `Navigated to ${wc.getURL()}${await getPostNavSummary(wc)}`;
 }
 
-export async function handleGoBack(
-  ctx: ActionContext,
-  tabId: string | null,
-): Promise<string> {
+export async function handleGoBack(ctx: ActionContext, tabId: string | null): Promise<string> {
   const tab = ctx.tabManager.getActiveTab();
   if (!tab || !tabId) return "Error: No active tab";
   const wc = tab.view.webContents;
@@ -56,10 +56,7 @@ export async function handleGoBack(
     : `Back action completed but page stayed on ${afterUrl}`;
 }
 
-export async function handleGoForward(
-  ctx: ActionContext,
-  tabId: string | null,
-): Promise<string> {
+export async function handleGoForward(ctx: ActionContext, tabId: string | null): Promise<string> {
   const tab = ctx.tabManager.getActiveTab();
   if (!tab || !tabId) return "Error: No active tab";
   const wc = tab.view.webContents;
@@ -75,10 +72,7 @@ export async function handleGoForward(
     : `Forward action completed but page stayed on ${afterUrl}`;
 }
 
-export async function handleReload(
-  ctx: ActionContext,
-  tabId: string | null,
-): Promise<string> {
+export async function handleReload(ctx: ActionContext, tabId: string | null): Promise<string> {
   const tab = ctx.tabManager.getActiveTab();
   if (!tab || !tabId) return "Error: No active tab";
   const wc = tab.view.webContents;

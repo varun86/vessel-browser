@@ -279,9 +279,7 @@ export async function fetchArticleTextExtract(
       document.querySelector("main") ||
       document.querySelector('[role="main"]') ||
       document.body;
-    const text = cleanArticleText(
-      readable?.textContent || fallbackRoot?.textContent || "",
-    );
+    const text = cleanArticleText(readable?.textContent || fallbackRoot?.textContent || "");
     if (text.length < 300) return null;
 
     return articleTextResultToOutput(

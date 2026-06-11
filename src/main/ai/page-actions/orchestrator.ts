@@ -20,16 +20,8 @@ import {
   handleCreateTab,
   handleSetAdBlocking,
 } from "./handlers/tabs";
-import {
-  handleNavigate,
-  handleGoBack,
-  handleGoForward,
-  handleReload,
-} from "./handlers/navigation";
-import {
-  handleCreateCheckpoint,
-  handleRestoreCheckpoint,
-} from "./handlers/checkpoints";
+import { handleNavigate, handleGoBack, handleGoForward, handleReload } from "./handlers/navigation";
+import { handleCreateCheckpoint, handleRestoreCheckpoint } from "./handlers/checkpoints";
 import {
   handleSaveSession,
   handleLoadSession,
@@ -101,12 +93,7 @@ const NO_ACTIVE_TAB_TOOLS = new Set([
 ]);
 
 /** Tools that reset the click-streak counter (verification actions) */
-const STREAK_RESET_TOOLS = new Set([
-  "read_page",
-  "inspect_element",
-  "screenshot",
-  "wait_for",
-]);
+const STREAK_RESET_TOOLS = new Set(["read_page", "inspect_element", "screenshot", "wait_for"]);
 
 /**
  * Tracks consecutive clicks on the same page URL without any verification
@@ -141,9 +128,7 @@ function detectConcatenatedToolName(name: string): string | null {
   for (const known of KNOWN_TOOLS) {
     if (name.startsWith(known) && name.length > known.length) {
       const remaining = name.slice(known.length);
-      const otherTools = [...KNOWN_TOOLS].filter((t) =>
-        remaining.includes(t),
-      );
+      const otherTools = [...KNOWN_TOOLS].filter((t) => remaining.includes(t));
       return `Error: It looks like you tried to call multiple tools at once (${known}, ${otherTools.join(", ")}). Please call them one at a time — send one tool call per message.`;
     }
   }
@@ -175,17 +160,9 @@ const INTERACT_ACTIONS = new Set([
   "clear_overlays",
 ]);
 
-const TAB_ACTIONS = new Set([
-  "create_tab",
-  "switch_tab",
-  "set_ad_blocking",
-  "load_session",
-]);
+const TAB_ACTIONS = new Set(["create_tab", "switch_tab", "set_ad_blocking", "load_session"]);
 
-async function getPostActionState(
-  ctx: ActionContext,
-  name: string,
-): Promise<string> {
+async function getPostActionState(ctx: ActionContext, name: string): Promise<string> {
   const tab = ctx.tabManager.getActiveTab();
   if (!tab) return "";
 
@@ -229,8 +206,10 @@ async function getPostActionState(
     // Detect when a click navigated to a filter/sort URL instead of a product
     // page — common mistake for small models on listing pages.
     if (name === "click" && ctx.toolProfile === "compact") {
-      const filterParams = /\b(condition|binding|format|availability|sort|filter|price|category_id|view)\b=[^&]/i;
-      const filterPath = /\/(condition|binding|format|availability|sort|filter|price|category)\/[^/?#]+/i;
+      const filterParams =
+        /\b(condition|binding|format|availability|sort|filter|price|category_id|view)\b=[^&]/i;
+      const filterPath =
+        /\/(condition|binding|format|availability|sort|filter|price|category)\/[^/?#]+/i;
       if (filterParams.test(currentUrl) || filterPath.test(currentUrl)) {
         warnings += `\nWARNING: The clicked link appears to be a filter or sort control, not a product. If you intended to click a product, call go_back and use click(index=N) on a result from read_page(mode="results_only").`;
       }
@@ -366,9 +345,7 @@ export async function executeAction(
   updateClickStreak(name, result);
 
   const formattedResult =
-    ctx.toolProfile === "compact"
-      ? formatCompactToolResult(name, result)
-      : result;
+    ctx.toolProfile === "compact" ? formatCompactToolResult(name, result) : result;
   const flowCtx = ctx.runtime.getFlowContext();
 
   // When a click causes navigation, include a lightweight page snapshot
@@ -382,10 +359,7 @@ export async function executeAction(
   ) {
     const summaryWc = ctx.tabManager.getActiveTab()?.view.webContents;
     if (summaryWc) {
-      clickNavSummary = await getPostClickNavSummary(
-        summaryWc,
-        ctx.toolProfile,
-      );
+      clickNavSummary = await getPostClickNavSummary(summaryWc, ctx.toolProfile);
     }
   }
 

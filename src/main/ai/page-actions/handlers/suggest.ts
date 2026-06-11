@@ -2,9 +2,7 @@ import type { ActionContext } from "../core";
 import { logger } from "../core";
 import { extractContent } from "../../../content/extractor";
 
-export async function handleSuggest(
-  ctx: ActionContext,
-): Promise<string> {
+export async function handleSuggest(ctx: ActionContext): Promise<string> {
   const wc = ctx.tabManager.getActiveTab()?.view.webContents;
   if (!wc) return "No active tab. Use navigate to open a page.";
   let page;
@@ -37,23 +35,14 @@ export async function handleSuggest(
       (el.placeholder || "").toLowerCase().includes("search"),
   );
   const formCount = page.forms.length;
-  const totalFields = page.forms.reduce(
-    (n, f) => n + f.fields.length,
-    0,
-  );
-  const linkCount = page.interactiveElements.filter(
-    (el) => el.type === "link",
-  ).length;
+  const totalFields = page.forms.reduce((n, f) => n + f.fields.length, 0);
+  const linkCount = page.interactiveElements.filter((el) => el.type === "link").length;
   const hasPagination = page.interactiveElements.some(
-    (el) =>
-      (el.text || "").toLowerCase() === "next" ||
-      el.text === "›" ||
-      el.text === "»",
+    (el) => (el.text || "").toLowerCase() === "next" || el.text === "›" || el.text === "»",
   );
   const hasOverlays = page.overlays.some((o) => o.blocksInteraction);
   const hasCookieConsent = page.overlays.some(
-    (overlay) =>
-      overlay.blocksInteraction && overlay.kind === "cookie_consent",
+    (overlay) => overlay.blocksInteraction && overlay.kind === "cookie_consent",
   );
 
   if (hasOverlays) {
@@ -70,49 +59,31 @@ export async function handleSuggest(
 
   if (hasPasswordField) {
     suggestions.push("LOGIN PAGE detected:");
-    suggestions.push(
-      "  → login(username, password) — handles the full flow",
-    );
-    suggestions.push(
-      "  → Or fill_form + submit_form for manual control",
-    );
+    suggestions.push("  → login(username, password) — handles the full flow");
+    suggestions.push("  → Or fill_form + submit_form for manual control");
   } else if (hasSearchInput && linkCount < 10) {
     suggestions.push("SEARCH PAGE detected:");
-    suggestions.push(
-      "  → search(query) — finds the box, types, submits",
-    );
+    suggestions.push("  → search(query) — finds the box, types, submits");
   } else if (hasSearchInput && linkCount >= 10) {
     suggestions.push("SEARCH RESULTS detected:");
-    suggestions.push(
-      "  → inspect_element(index) to inspect one result card",
-    );
+    suggestions.push("  → inspect_element(index) to inspect one result card");
     suggestions.push("  → click on a result link");
-    if (hasPagination)
-      suggestions.push("  → paginate('next') for more results");
+    if (hasPagination) suggestions.push("  → paginate('next') for more results");
   } else if (formCount > 0) {
     suggestions.push(`FORM detected (${totalFields} fields):`);
     suggestions.push("  → fill_form(fields) — fill all fields at once");
   } else if (hasPagination) {
     suggestions.push("PAGINATED CONTENT:");
-    suggestions.push(
-      "  → read_page(mode='results_only') to inspect likely results",
-    );
+    suggestions.push("  → read_page(mode='results_only') to inspect likely results");
     suggestions.push("  → paginate('next') for the next page");
-  } else if (
-    page.content.length > 3000 &&
-    page.interactiveElements.length < 10
-  ) {
+  } else if (page.content.length > 3000 && page.interactiveElements.length < 10) {
     suggestions.push("ARTICLE/CONTENT page:");
     suggestions.push("  → read_page(mode='summary') for a fast brief");
-    suggestions.push(
-      "  → read_page(mode='text_only') for readable text",
-    );
+    suggestions.push("  → read_page(mode='text_only') for readable text");
     suggestions.push("  → scroll to see more");
   } else {
     suggestions.push("GENERAL PAGE:");
-    suggestions.push(
-      "  → read_page(mode='visible_only') to inspect active controls",
-    );
+    suggestions.push("  → read_page(mode='visible_only') to inspect active controls");
     suggestions.push("  → click on any element by index");
     suggestions.push("  → navigate to go somewhere new");
   }

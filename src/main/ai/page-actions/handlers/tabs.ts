@@ -34,10 +34,7 @@ export function handleListTabs(ctx: ActionContext): string {
   return lines.join("\n") || "No tabs open";
 }
 
-export function handleSwitchTab(
-  ctx: ActionContext,
-  args: Record<string, unknown>,
-): string {
+export function handleSwitchTab(ctx: ActionContext, args: Record<string, unknown>): string {
   let targetId = typeof args.tabId === "string" ? args.tabId.trim() : "";
   if (!targetId) {
     targetId = getTabByMatch(ctx.tabManager, args.match)?.id || "";
@@ -55,9 +52,7 @@ export async function handleCreateTab(
   args: Record<string, unknown>,
 ): Promise<string> {
   const createdId = ctx.tabManager.createTab(
-    typeof args.url === "string" && args.url.trim()
-      ? args.url.trim()
-      : "about:blank",
+    typeof args.url === "string" && args.url.trim() ? args.url.trim() : "about:blank",
   );
   const created = ctx.tabManager.getTab(createdId);
   if (created) {

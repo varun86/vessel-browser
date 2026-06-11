@@ -1,5 +1,10 @@
 import type { ActionContext } from "../core";
-import { PAGE_SCRIPT_TIMEOUT, pageBusyError, executePageScript, waitForPotentialNavigation } from "../core";
+import {
+  PAGE_SCRIPT_TIMEOUT,
+  pageBusyError,
+  executePageScript,
+  waitForPotentialNavigation,
+} from "../core";
 import {
   focusElement,
   hoverElement,
@@ -62,8 +67,7 @@ export async function handleClick(
 ): Promise<string> {
   const wc = ctx.tabManager.getActiveTab()?.view.webContents;
   if (!wc) return "Error: No active tab";
-  const textTarget =
-    typeof args.text === "string" && args.text.trim() ? args.text.trim() : "";
+  const textTarget = typeof args.text === "string" && args.text.trim() ? args.text.trim() : "";
   let selector: string | null | typeof PAGE_SCRIPT_TIMEOUT = null;
 
   if (typeof args.selector === "string" && args.selector.trim()) {
@@ -96,8 +100,7 @@ export async function handleInspectElement(
   const wc = ctx.tabManager.getActiveTab()?.view.webContents;
   if (!wc) return "Error: No active tab";
   let selector: string | null | typeof PAGE_SCRIPT_TIMEOUT = null;
-  const textTarget =
-    typeof args.text === "string" && args.text.trim() ? args.text.trim() : "";
+  const textTarget = typeof args.text === "string" && args.text.trim() ? args.text.trim() : "";
   if (textTarget) {
     if (isInvalidTextTargetQuery(textTarget)) {
       return `Error: "${textTarget}" looks like HTML or markup, not visible page text. Use a section title, book title, or element index instead.`;
@@ -112,11 +115,7 @@ export async function handleInspectElement(
   if (!selector) {
     return "Error: No element index, selector, or visible text provided";
   }
-  return inspectElement(
-    wc,
-    selector,
-    typeof args.limit === "number" ? args.limit : 8,
-  );
+  return inspectElement(wc, selector, typeof args.limit === "number" ? args.limit : 8);
 }
 
 export async function handleTypeText(
@@ -230,9 +229,7 @@ export async function handleFocus(
   return focusElement(wc, selector);
 }
 
-export async function handleDismissPopup(
-  ctx: ActionContext,
-): Promise<string> {
+export async function handleDismissPopup(ctx: ActionContext): Promise<string> {
   const wc = ctx.tabManager.getActiveTab()?.view.webContents;
   if (!wc) return "Error: No active tab";
   return dismissPopup(wc);
@@ -244,8 +241,7 @@ export async function handleClearOverlays(
 ): Promise<string> {
   const wc = ctx.tabManager.getActiveTab()?.view.webContents;
   if (!wc) return "Error: No active tab";
-  const strategy =
-    args.strategy === "interactive" ? "interactive" : "auto";
+  const strategy = args.strategy === "interactive" ? "interactive" : "auto";
   return clearOverlays(wc, strategy);
 }
 
@@ -256,8 +252,7 @@ export async function handleScrollToElement(
   const wc = ctx.tabManager.getActiveTab()?.view.webContents;
   if (!wc) return "Error: No active tab";
   let sel: string | null | typeof PAGE_SCRIPT_TIMEOUT = null;
-  const textTarget =
-    typeof args.text === "string" && args.text.trim() ? args.text.trim() : "";
+  const textTarget = typeof args.text === "string" && args.text.trim() ? args.text.trim() : "";
   if (textTarget) {
     if (isInvalidTextTargetQuery(textTarget)) {
       return `Error: "${textTarget}" looks like HTML or markup, not visible page text. Use a section title or element index instead.`;
@@ -270,12 +265,7 @@ export async function handleScrollToElement(
   if (!sel) {
     return "Error: Provide an index, selector, or visible text for the element to scroll to.";
   }
-  const block =
-    args.position === "top"
-      ? "start"
-      : args.position === "bottom"
-        ? "end"
-        : "center";
+  const block = args.position === "top" ? "start" : args.position === "bottom" ? "end" : "center";
   if (sel.startsWith("__vessel_idx:")) {
     const idx = Number(sel.slice("__vessel_idx:".length));
     return wc.executeJavaScript(`

@@ -6,11 +6,7 @@ import {
   waitForPotentialNavigation,
 } from "../core";
 import { waitForLoad } from "../../../utils/webcontents-utils";
-import {
-  fillFormFields,
-  setElementValue,
-  submitForm,
-} from "../interaction";
+import { fillFormFields, setElementValue, submitForm } from "../interaction";
 import { clickResolvedSelector, searchPage } from "../navigation";
 
 export async function handleFillForm(
@@ -24,18 +20,13 @@ export async function handleFillForm(
   const fillResults = await fillFormFields(wc, fields);
   const results = fillResults.map((item) => item.result);
   if (args.submit) {
-    const firstSel =
-      fillResults.find((item) => item.selector)?.selector ?? null;
+    const firstSel = fillResults.find((item) => item.selector)?.selector ?? null;
     if (firstSel) {
       const beforeUrl = wc.getURL();
       const submitResult = await submitForm(wc, { selector: firstSel });
       await waitForPotentialNavigation(wc, beforeUrl);
       const afterUrl = wc.getURL();
-      results.push(
-        afterUrl !== beforeUrl
-          ? `Submitted → ${afterUrl}`
-          : submitResult,
-      );
+      results.push(afterUrl !== beforeUrl ? `Submitted → ${afterUrl}` : submitResult);
     }
   }
   return `Filled ${results.length} field(s):\n${results.join("\n")}`;
@@ -84,20 +75,11 @@ export async function handleLogin(
     `,
       { label: "find password field" },
     ));
-  if (!passSel)
-    return "Error: Could not find password field. Try providing password_selector.";
+  if (!passSel) return "Error: Could not find password field. Try providing password_selector.";
 
-  const userResult = await setElementValue(
-    wc,
-    userSel,
-    String(args.username || ""),
-  );
+  const userResult = await setElementValue(wc, userSel, String(args.username || ""));
   steps.push(userResult);
-  const passResult = await setElementValue(
-    wc,
-    passSel,
-    String(args.password || ""),
-  );
+  const passResult = await setElementValue(wc, passSel, String(args.password || ""));
   steps.push(passResult);
 
   const beforeUrl = wc.getURL();
@@ -129,18 +111,11 @@ export async function handleLogin(
 
   await waitForPotentialNavigation(wc, beforeUrl);
   const afterUrl = wc.getURL();
-  steps.push(
-    afterUrl !== beforeUrl
-      ? `Submitted → ${afterUrl}`
-      : "Form submitted (same page)",
-  );
+  steps.push(afterUrl !== beforeUrl ? `Submitted → ${afterUrl}` : "Form submitted (same page)");
   return `Login flow complete:\n${steps.join("\n")}`;
 }
 
-export function handleSearch(
-  ctx: ActionContext,
-  args: Record<string, unknown>,
-): Promise<string> {
+export function handleSearch(ctx: ActionContext, args: Record<string, unknown>): Promise<string> {
   const wc = ctx.tabManager.getActiveTab()?.view.webContents;
   if (!wc) return Promise.resolve("Error: No active tab");
   return searchPage(wc, args);

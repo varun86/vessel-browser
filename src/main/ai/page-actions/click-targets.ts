@@ -3,10 +3,7 @@ import { selectorHelpersJS } from "../../../shared/dom/selector-helpers-js";
 import { sleep } from "../../utils/webcontents-utils";
 import { executePageScript, PAGE_SCRIPT_TIMEOUT, pageBusyError } from "./core";
 
-export async function clickElement(
-  wc: WebContents,
-  selector: string,
-): Promise<string> {
+export async function clickElement(wc: WebContents, selector: string): Promise<string> {
   const target = await executePageScript<{
     x: number;
     y: number;
@@ -125,10 +122,7 @@ export async function clickElement(
     : "Clicked via pointer events";
 }
 
-export async function activateElement(
-  wc: WebContents,
-  selector: string,
-): Promise<string> {
+export async function activateElement(wc: WebContents, selector: string): Promise<string> {
   const activated = await executePageScript<{ ok?: boolean; error?: string }>(
     wc,
     `
@@ -168,7 +162,8 @@ export async function describeElementForClick(
   wc: WebContents,
   selector: string,
 ): Promise<
-  { text: string; href?: string; target?: string; tag?: string; isInteractive?: boolean } | { error: string }
+  | { text: string; href?: string; target?: string; tag?: string; isInteractive?: boolean }
+  | { error: string }
 > {
   const result = await executePageScript<{
     text?: string;
@@ -216,22 +211,10 @@ export async function describeElementForClick(
   }
 
   return {
-    text:
-      "text" in result && typeof result.text === "string"
-        ? result.text
-        : "Element",
-    href:
-      "href" in result && typeof result.href === "string"
-        ? result.href
-        : undefined,
-    target:
-      "target" in result && typeof result.target === "string"
-        ? result.target
-        : undefined,
-    tag:
-      "tag" in result && typeof result.tag === "string"
-        ? result.tag
-        : undefined,
+    text: "text" in result && typeof result.text === "string" ? result.text : "Element",
+    href: "href" in result && typeof result.href === "string" ? result.href : undefined,
+    target: "target" in result && typeof result.target === "string" ? result.target : undefined,
+    tag: "tag" in result && typeof result.tag === "string" ? result.tag : undefined,
     isInteractive:
       "isInteractive" in result && typeof result.isInteractive === "boolean"
         ? result.isInteractive
@@ -464,8 +447,7 @@ export async function inspectElement(
     lines.push("Nearby controls:");
     for (const item of result.nearby) {
       const hrefSuffix = item.href ? ` -> ${item.href}` : "";
-      const indexPrefix =
-        typeof item.index === "number" ? `[#${item.index}] ` : "";
+      const indexPrefix = typeof item.index === "number" ? `[#${item.index}] ` : "";
       lines.push(
         `- ${indexPrefix}${item.label} [${item.type}] selector=${item.selector}${hrefSuffix}`,
       );
@@ -475,10 +457,8 @@ export async function inspectElement(
     lines.push("Likely purchase actions:");
     for (const item of result.purchaseActions) {
       const hrefSuffix = item.href ? ` -> ${item.href}` : "";
-      const sourceSuffix =
-        item.source === "nearby" ? " (same region)" : " (elsewhere on page)";
-      const indexPrefix =
-        typeof item.index === "number" ? `[#${item.index}] ` : "";
+      const sourceSuffix = item.source === "nearby" ? " (same region)" : " (elsewhere on page)";
+      const indexPrefix = typeof item.index === "number" ? `[#${item.index}] ` : "";
       lines.push(
         `- ${indexPrefix}${item.label} [${item.type}] selector=${item.selector}${hrefSuffix}${sourceSuffix}`,
       );

@@ -1,12 +1,12 @@
 import type { WebContents } from "electron";
 import { selectorHelpersJS } from "../../../shared/dom/selector-helpers-js";
-import { buildOverlayInventory, getBlockingOverlaySignature } from "../../content/overlay-inventory";
+import {
+  buildOverlayInventory,
+  getBlockingOverlaySignature,
+} from "../../content/overlay-inventory";
 import { extractContent } from "../../content/extractor";
 import { assertSafeURL } from "../../network/url-safety";
-import {
-  getCartAddedSummary,
-  recordProductAddedToCart,
-} from "../cart-click-state";
+import { getCartAddedSummary, recordProductAddedToCart } from "../cart-click-state";
 import {
   executePageScript,
   PAGE_SCRIPT_TIMEOUT,
@@ -45,11 +45,7 @@ async function getLocaleSnapshot(
     },
   );
 
-  if (
-    !snapshot ||
-    snapshot === PAGE_SCRIPT_TIMEOUT ||
-    typeof snapshot !== "object"
-  ) {
+  if (!snapshot || snapshot === PAGE_SCRIPT_TIMEOUT || typeof snapshot !== "object") {
     return null;
   }
 
@@ -74,8 +70,7 @@ function localeChanged(
   if (beforeLang && afterLang && beforeLang !== afterLang) {
     return true;
   }
-  const localeHint =
-    /[?&](lang|locale|language|hl)=|\/(ja|jp|en|fr|de|es|it|ko|zh)(\/|$)/i;
+  const localeHint = /[?&](lang|locale|language|hl)=|\/(ja|jp|en|fr|de|es|it|ko|zh)(\/|$)/i;
   return before.url !== after.url && localeHint.test(after.url);
 }
 
@@ -95,7 +90,10 @@ async function restoreLocaleSnapshot(
       }
     }
   } catch (err) {
-    logger.warn("Failed to restore locale via history navigation, trying URL reload fallback:", err);
+    logger.warn(
+      "Failed to restore locale via history navigation, trying URL reload fallback:",
+      err,
+    );
   }
 
   if (snapshot.url && snapshot.url !== wc.getURL()) {
@@ -141,7 +139,12 @@ async function getProductPageTitle(wc: WebContents): Promise<string> {
       })()`,
       { timeoutMs: 800, label: "get product title" },
     );
-    if (heading && heading !== PAGE_SCRIPT_TIMEOUT && typeof heading === "string" && heading.length > 0) {
+    if (
+      heading &&
+      heading !== PAGE_SCRIPT_TIMEOUT &&
+      typeof heading === "string" &&
+      heading.length > 0
+    ) {
       return heading;
     }
   } catch {
@@ -393,9 +396,7 @@ export async function dismissPopupWithClick(
   clickElement: (wc: WebContents, selector: string) => Promise<string>,
 ): Promise<string> {
   const before = await extractContent(wc);
-  const initialBlocking = before.overlays.filter(
-    (overlay) => overlay.blocksInteraction,
-  ).length;
+  const initialBlocking = before.overlays.filter((overlay) => overlay.blocksInteraction).length;
 
   // Refuse to dismiss cart confirmation dialogs — the model should interact
   // with the dialog buttons (View Cart, Continue Shopping) instead.
@@ -622,11 +623,7 @@ export async function dismissPopupWithClick(
 
   if (Array.isArray(candidates)) {
     for (const candidate of candidates) {
-      if (
-        !candidate ||
-        typeof candidate !== "object" ||
-        typeof candidate.selector !== "string"
-      ) {
+      if (!candidate || typeof candidate !== "object" || typeof candidate.selector !== "string") {
         continue;
       }
       const result = await clickElement(wc, candidate.selector);
@@ -638,13 +635,8 @@ export async function dismissPopupWithClick(
         continue;
       }
       const after = await extractContent(wc);
-      const blocking = after.overlays.filter(
-        (overlay) => overlay.blocksInteraction,
-      ).length;
-      if (
-        blocking < initialBlocking ||
-        (initialBlocking > 0 && blocking === 0)
-      ) {
+      const blocking = after.overlays.filter((overlay) => overlay.blocksInteraction).length;
+      if (blocking < initialBlocking || (initialBlocking > 0 && blocking === 0)) {
         const label =
           typeof candidate.label === "string" && candidate.label
             ? candidate.label
@@ -660,13 +652,8 @@ export async function dismissPopupWithClick(
   await sleep(200);
 
   const afterEscape = await extractContent(wc);
-  const escapeBlocking = afterEscape.overlays.filter(
-    (overlay) => overlay.blocksInteraction,
-  ).length;
-  if (
-    escapeBlocking < initialBlocking ||
-    (initialBlocking > 0 && escapeBlocking === 0)
-  ) {
+  const escapeBlocking = afterEscape.overlays.filter((overlay) => overlay.blocksInteraction).length;
+  if (escapeBlocking < initialBlocking || (initialBlocking > 0 && escapeBlocking === 0)) {
     return "Dismissed popup with Escape";
   }
 
@@ -677,9 +664,7 @@ export async function dismissPopupWithClick(
       : "No blocking popup detected";
 }
 
-function describeOverlayState(
-  page: Awaited<ReturnType<typeof extractContent>>,
-): {
+function describeOverlayState(page: Awaited<ReturnType<typeof extractContent>>): {
   inventory: ReturnType<typeof buildOverlayInventory>;
   blocking: number;
   total: number;
@@ -1028,9 +1013,7 @@ export async function tryAcceptCookiesQuickly(
   );
   if (dismissed) return dismissed;
   const iframeDismissed = await tryDismissConsentIframe(wc);
-  return iframeDismissed
-    ? { status: "dismissed", message: iframeDismissed }
-    : null;
+  return iframeDismissed ? { status: "dismissed", message: iframeDismissed } : null;
 }
 
 export async function clearOverlaysWithHandlers(
@@ -1063,9 +1046,7 @@ export async function clearOverlaysWithHandlers(
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
     const before = await extractContent(wc);
     const beforeState = describeOverlayState(before);
-    const blockingOverlays = beforeState.inventory.filter(
-      (overlay) => overlay.blocksInteraction,
-    );
+    const blockingOverlays = beforeState.inventory.filter((overlay) => overlay.blocksInteraction);
 
     if (blockingOverlays.length === 0) {
       // No blocking overlays in main frame — check for iframe-based consent
@@ -1102,10 +1083,7 @@ export async function clearOverlaysWithHandlers(
           return steps.join("\n");
         }
       } else {
-        const optionResult = await handlers.clickOverlayCandidate(
-          wc,
-          overlay.correctOption,
-        );
+        const optionResult = await handlers.clickOverlayCandidate(wc, overlay.correctOption);
         if (optionResult) {
           actionMessage = `Selected likely-correct option: ${optionResult}`;
           await sleep(120);

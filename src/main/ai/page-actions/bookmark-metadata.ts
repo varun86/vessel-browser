@@ -6,9 +6,7 @@ import { normalizeBookmarkMetadata } from "../../bookmarks/metadata";
  * Accepts both camelCase and snake_case field names for cross-model
  * compatibility.
  */
-export function getBookmarkMetadataFromArgs(
-  args: Record<string, unknown>,
-): Partial<Bookmark> {
+export function getBookmarkMetadataFromArgs(args: Record<string, unknown>): Partial<Bookmark> {
   return normalizeBookmarkMetadata({
     intent: args.intent,
     expectedContent: args.expectedContent ?? args.expected_content,

@@ -38,25 +38,13 @@ export async function handleReadPage(
     return glanceExtract(wc);
   }
 
-  const requestedTextMode =
-    typeof args.mode === "string"
-      ? args.mode.trim().toLowerCase()
-      : "";
-  if (
-    requestedTextMode === "summary" ||
-    requestedTextMode === "text_only"
-  ) {
-    const fastArticleText = await fastArticleTextExtract(
-      wc,
-      requestedTextMode,
-    );
+  const requestedTextMode = typeof args.mode === "string" ? args.mode.trim().toLowerCase() : "";
+  if (requestedTextMode === "summary" || requestedTextMode === "text_only") {
+    const fastArticleText = await fastArticleTextExtract(wc, requestedTextMode);
     if (fastArticleText) {
       return fastArticleText;
     }
-    const fetchedArticleText = await fetchArticleTextExtract(
-      wc,
-      requestedTextMode,
-    );
+    const fetchedArticleText = await fetchArticleTextExtract(wc, requestedTextMode);
     if (fetchedArticleText) {
       return fetchedArticleText;
     }
@@ -111,19 +99,13 @@ export async function handleReadPage(
 
   if (content && content.content.length > 0) {
     const liveSelectionSection = formatLiveSelectionSection(
-      await captureLiveHighlightSnapshot(
-        wc,
-        highlightsManager.getHighlightsForUrl(content.url),
-      ),
+      await captureLiveHighlightSnapshot(wc, highlightsManager.getHighlightsForUrl(content.url)),
     );
-    const livePrefix = liveSelectionSection
-      ? `${liveSelectionSection}\n\n`
-      : "";
+    const livePrefix = liveSelectionSection ? `${liveSelectionSection}\n\n` : "";
     const baseMode = normalizeReadPageMode(args.mode, content);
     const requestedMode =
       ctx.toolProfile === "compact" &&
-      (args.mode == null ||
-        (typeof args.mode === "string" && !args.mode.trim()))
+      (args.mode == null || (typeof args.mode === "string" && !args.mode.trim()))
         ? chooseCompactReadMode(content, baseMode)
         : baseMode;
 

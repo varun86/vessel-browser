@@ -4,10 +4,7 @@ import { resolveBookmarkSourceDraft } from "../../bookmarks/page-source";
 import * as bookmarkManager from "../../bookmarks/manager";
 import { resolveSelector } from "../../utils/selector-resolver";
 import { waitForLoad } from "../../utils/webcontents-utils";
-import {
-  formatDeadLinkMessage,
-  validateLinkDestination,
-} from "../../network/link-validation";
+import { formatDeadLinkMessage, validateLinkDestination } from "../../network/link-validation";
 import {
   composeDuplicateBookmarkResponse,
   composeFolderAwareResponse,
@@ -16,9 +13,7 @@ import {
 } from "../page-bookmarks";
 import type { ActionContext } from "./core";
 
-type BookmarkMetadataResolver = (
-  args: Record<string, unknown>,
-) => Partial<Bookmark>;
+type BookmarkMetadataResolver = (args: Record<string, unknown>) => Partial<Bookmark>;
 
 export async function handleBookmarkAction(args: {
   name: string;
@@ -28,48 +23,31 @@ export async function handleBookmarkAction(args: {
   tabId?: string | null;
   getBookmarkMetadataFromArgs: BookmarkMetadataResolver;
 }): Promise<string> {
-  const {
-    name,
-    actionArgs,
-    ctx,
-    wc,
-    tabId,
-    getBookmarkMetadataFromArgs,
-  } = args;
+  const { name, actionArgs, ctx, wc, tabId, getBookmarkMetadataFromArgs } = args;
 
   switch (name) {
     case "list_bookmarks": {
       const state = bookmarkManager.getState();
-      const folderId =
-        typeof actionArgs.folderId === "string" ? actionArgs.folderId.trim() : "";
+      const folderId = typeof actionArgs.folderId === "string" ? actionArgs.folderId.trim() : "";
       const folderName =
         typeof actionArgs.folderName === "string" ? actionArgs.folderName.trim() : "";
       const resolvedFolderId =
         folderId ||
         (folderName
-          ? (state.folders.find(
-              (folder) =>
-                folder.name.toLowerCase() === folderName.toLowerCase(),
-            )?.id ?? "")
+          ? (state.folders.find((folder) => folder.name.toLowerCase() === folderName.toLowerCase())
+              ?.id ?? "")
           : "");
 
       if (folderName && !resolvedFolderId) {
         return `Folder "${folderName}" not found`;
       }
 
-      const folders = [
-        { id: "unsorted", name: "Unsorted" },
-        ...state.folders,
-      ];
+      const folders = [{ id: "unsorted", name: "Unsorted" }, ...state.folders];
       const lines: string[] = [];
       for (const folder of folders) {
         if (resolvedFolderId && folder.id !== resolvedFolderId) continue;
-        const items = state.bookmarks.filter(
-          (bookmark) => bookmark.folderId === folder.id,
-        );
-        lines.push(
-          `[${folder.name}] (id=${folder.id}, ${items.length} items)`,
-        );
+        const items = state.bookmarks.filter((bookmark) => bookmark.folderId === folder.id);
+        lines.push(`[${folder.name}] (id=${folder.id}, ${items.length} items)`);
         if ("summary" in folder && typeof folder.summary === "string") {
           lines.push(`summary: ${folder.summary}`);
         }
@@ -93,14 +71,10 @@ export async function handleBookmarkAction(args: {
 
       const lines = matches.map(({ bookmark, folder, matchedFields }) => {
         const folderLabel =
-          bookmark.folderId === "unsorted"
-            ? "Unsorted"
-            : (folder?.name ?? bookmark.folderId);
+          bookmark.folderId === "unsorted" ? "Unsorted" : (folder?.name ?? bookmark.folderId);
         return `- ${bookmark.title} | ${bookmark.url} | folder=${folderLabel} | matched=${matchedFields.join(",")} | id=${bookmark.id}${bookmark.note ? ` | note: ${bookmark.note}` : ""}`;
       });
-      return [`Matches for "${query}" (${matches.length})`, ...lines].join(
-        "\n",
-      );
+      return [`Matches for "${query}" (${matches.length})`, ...lines].join("\n");
     }
 
     case "create_bookmark_folder": {
@@ -112,25 +86,19 @@ export async function handleBookmarkAction(args: {
       if (!folderName) return "Error: Folder name is required";
       const existing = bookmarkManager
         .getState()
-        .folders.find(
-          (folder) => folder.name.toLowerCase() === folderName.toLowerCase(),
-        );
+        .folders.find((folder) => folder.name.toLowerCase() === folderName.toLowerCase());
       if (existing) {
         return composeFolderAwareResponse(
           `Folder "${existing.name}" already exists (id=${existing.id})`,
         );
       }
       const folder = bookmarkManager.createFolderWithSummary(folderName, summary);
-      return composeFolderAwareResponse(
-        `Created folder "${folder.name}" (id=${folder.id})`,
-      );
+      return composeFolderAwareResponse(`Created folder "${folder.name}" (id=${folder.id})`);
     }
 
     case "save_bookmark": {
       const resolvedSelector =
-        wc &&
-        (typeof actionArgs.index === "number" ||
-          typeof actionArgs.selector === "string")
+        wc && (typeof actionArgs.index === "number" || typeof actionArgs.selector === "string")
           ? await resolveSelector(wc, actionArgs.index, actionArgs.selector)
           : null;
       const source = await resolveBookmarkSourceDraft(wc, {
@@ -191,9 +159,7 @@ export async function handleBookmarkAction(args: {
           ? actionArgs.note.trim()
           : undefined;
       const resolvedSelector =
-        wc &&
-        (typeof actionArgs.index === "number" ||
-          typeof actionArgs.selector === "string")
+        wc && (typeof actionArgs.index === "number" || typeof actionArgs.selector === "string")
           ? await resolveSelector(wc, actionArgs.index, actionArgs.selector)
           : null;
       const source = await resolveBookmarkSourceDraft(wc, {
@@ -261,9 +227,7 @@ export async function handleBookmarkAction(args: {
           ? actionArgs.note.trim()
           : undefined;
       const resolvedSelector =
-        wc &&
-        (typeof actionArgs.index === "number" ||
-          typeof actionArgs.selector === "string")
+        wc && (typeof actionArgs.index === "number" || typeof actionArgs.selector === "string")
           ? await resolveSelector(wc, actionArgs.index, actionArgs.selector)
           : null;
       const source = await resolveBookmarkSourceDraft(wc, {
@@ -300,9 +264,7 @@ export async function handleBookmarkAction(args: {
       }
 
       if ("error" in source) {
-        return bookmarkId
-          ? `Bookmark ${bookmarkId} not found`
-          : `Error: ${source.error}`;
+        return bookmarkId ? `Bookmark ${bookmarkId} not found` : `Error: ${source.error}`;
       }
 
       const bookmark = bookmarkManager.saveBookmark(

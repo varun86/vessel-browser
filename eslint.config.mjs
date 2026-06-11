@@ -66,10 +66,7 @@ export default tseslint.config(
     // live in page-actions.ts itself (executeAction, clickResolvedSelector,
     // isDangerousAction, scrollPage, etc.) are the only ones the barrel is
     // allowed to export.
-    files: [
-      "src/**/*.{ts,tsx}",
-      "tests/**/*.{ts,tsx}",
-    ],
+    files: ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"],
     ignores: ["src/main/ai/page-actions.ts", "src/main/ai/page-actions/**/*"],
     rules: {
       "no-restricted-syntax": [

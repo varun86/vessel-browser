@@ -3,9 +3,7 @@ import { captureScreenshot } from "../../../content/screenshot";
 import { makeImageResult } from "../../tool-result";
 import { waitForCondition } from "../interaction";
 
-export async function handleScreenshot(
-  ctx: ActionContext,
-): Promise<string> {
+export async function handleScreenshot(ctx: ActionContext): Promise<string> {
   const tab = ctx.tabManager.getActiveTab();
   if (!tab) return "Error: No active tab";
   const wc = tab.view.webContents;
@@ -36,8 +34,7 @@ export async function handleWaitForNavigation(
 ): Promise<string> {
   const wc = ctx.tabManager.getActiveTab()?.view.webContents;
   if (!wc) return "Error: No active tab";
-  const timeout =
-    typeof args.timeoutMs === "number" ? args.timeoutMs : 10000;
+  const timeout = typeof args.timeoutMs === "number" ? args.timeoutMs : 10000;
   const beforeUrl = wc.getURL();
   if (wc.isLoading()) {
     // Page is currently loading — wait for it to finish

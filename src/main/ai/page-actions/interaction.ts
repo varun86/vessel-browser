@@ -1,11 +1,7 @@
 import type { WebContents } from "electron";
 import { selectorHelpersJS } from "../../../shared/dom/selector-helpers-js";
 import { resolveSelector } from "../../utils/selector-resolver";
-import {
-  sleep,
-  waitForLoad,
-  waitForPotentialNavigation,
-} from "../../utils/webcontents-utils";
+import { sleep, waitForLoad, waitForPotentialNavigation } from "../../utils/webcontents-utils";
 import {
   executePageScript,
   loadPermittedUrl,
@@ -160,11 +156,7 @@ export async function fillFormFields(
       continue;
     }
 
-    const result = await setElementValue(
-      wc,
-      selector,
-      String(field.value || ""),
-    );
+    const result = await setElementValue(wc, selector, String(field.value || ""));
     results.push({ field, selector, result });
   }
 
@@ -342,10 +334,7 @@ export async function typeKeystroke(
     : result || "Error: Could not type into element";
 }
 
-export async function hoverElement(
-  wc: WebContents,
-  selector: string,
-): Promise<string> {
+export async function hoverElement(wc: WebContents, selector: string): Promise<string> {
   const pos = await wc.executeJavaScript(`
     (function() {
       const el = document.querySelector(${JSON.stringify(selector)});
@@ -370,18 +359,14 @@ export async function hoverElement(
   if ("error" in pos && typeof pos.error === "string") return pos.error;
   const x = typeof pos.x === "number" ? pos.x : null;
   const y = typeof pos.y === "number" ? pos.y : null;
-  if (x == null || y == null)
-    return "Error: Could not resolve hover coordinates";
+  if (x == null || y == null) return "Error: Could not resolve hover coordinates";
 
   wc.sendInputEvent({ type: "mouseMove", x, y });
   const label = typeof pos.label === "string" ? pos.label : "element";
   return `Hovered: ${label}`;
 }
 
-export async function focusElement(
-  wc: WebContents,
-  selector: string,
-): Promise<string> {
+export async function focusElement(wc: WebContents, selector: string): Promise<string> {
   return wc.executeJavaScript(`
     (function() {
       const el = document.querySelector(${JSON.stringify(selector)});
@@ -402,11 +387,8 @@ export async function waitForCondition(
 ): Promise<string> {
   const timeoutMs = Math.max(250, Number(args.timeoutMs) || 5000);
   const selector =
-    typeof args.selector === "string" && args.selector.trim()
-      ? args.selector.trim()
-      : "";
-  const text =
-    typeof args.text === "string" && args.text.trim() ? args.text.trim() : "";
+    typeof args.selector === "string" && args.selector.trim() ? args.selector.trim() : "";
+  const text = typeof args.text === "string" && args.text.trim() ? args.text.trim() : "";
 
   if (!selector && !text) {
     return "Error: wait_for requires text or selector";
@@ -503,10 +485,7 @@ export async function selectOption(
     : result || "Error: Could not select option";
 }
 
-export async function submitForm(
-  wc: WebContents,
-  args: Record<string, unknown>,
-): Promise<string> {
+export async function submitForm(wc: WebContents, args: Record<string, unknown>): Promise<string> {
   const beforeUrl = wc.getURL();
   let selector = await resolveSelector(wc, args.index, args.selector);
 
@@ -752,17 +731,11 @@ export async function waitForConditionDirect(
   return waitForCondition(wc, { text, selector, timeoutMs });
 }
 
-export async function submitFormBySelector(
-  wc: WebContents,
-  selector: string,
-): Promise<string> {
+export async function submitFormBySelector(wc: WebContents, selector: string): Promise<string> {
   return submitForm(wc, { selector });
 }
 
-export async function pressKey(
-  wc: WebContents,
-  args: Record<string, unknown>,
-): Promise<string> {
+export async function pressKey(wc: WebContents, args: Record<string, unknown>): Promise<string> {
   const key = typeof args.key === "string" ? args.key.trim() : "";
   if (!key) return "Error: No key provided";
 
@@ -809,8 +782,7 @@ export async function pressKey(
 
   wc.focus();
 
-  const normalizedKey =
-    key.length === 1 ? key : key[0].toUpperCase() + key.slice(1);
+  const normalizedKey = key.length === 1 ? key : key[0].toUpperCase() + key.slice(1);
   const electronKeyCode =
     normalizedKey === "Enter"
       ? "Return"
@@ -832,8 +804,6 @@ export async function pressKey(
   wc.sendInputEvent({ type: "keyUp", keyCode: electronKeyCode });
 
   const label =
-    "label" in focusResult && typeof focusResult.label === "string"
-      ? focusResult.label
-      : null;
+    "label" in focusResult && typeof focusResult.label === "string" ? focusResult.label : null;
   return label ? `Pressed key: ${key} on ${label}` : `Pressed key: ${key}`;
 }

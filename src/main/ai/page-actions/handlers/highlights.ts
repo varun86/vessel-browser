@@ -27,14 +27,7 @@ export async function handleHighlight(
     );
   }
 
-  return highlightOnPage(
-    wc,
-    selector,
-    highlightText,
-    args.label,
-    args.durationMs,
-    highlightColor,
-  );
+  return highlightOnPage(wc, selector, highlightText, args.label, args.durationMs, highlightColor);
 }
 
 export function handleClearHighlights(ctx: ActionContext): string {
