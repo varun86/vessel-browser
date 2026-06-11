@@ -23,6 +23,8 @@ const ALLOWED_ATTR = new Set([
  * This is NOT a full HTML sanitizer — it's a test mock that
  * approximates the production DOMPurify behavior.
  */
+// The _opts parameter mirrors the dompurify API signature; the mock ignores it.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function sanitize(html, _opts) {
   // Remove attributes that aren't in the allowlist from all tags
   let result = html.replace(

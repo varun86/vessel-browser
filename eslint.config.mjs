@@ -54,5 +54,11 @@ export default tseslint.config(
       "no-control-regex": "off",
     },
   },
+  {
+    files: ["src/main/network/downloads.ts"],
+    rules: {
+      "no-control-regex": "off",
+    },
+  },
   prettierConfig,
 );
