@@ -12,10 +12,23 @@ import { AnthropicProvider } from "./provider-anthropic";
 import { OpenAICompatProvider } from "./provider-openai";
 import { PROVIDERS } from "../../shared/providers";
 import { CodexProvider, CODEX_CLIENT_VERSION } from "./provider-codex";
-import { readStoredCodexTokens } from "../config/settings";
+import { refreshAccessToken } from "./codex-oauth";
+import {
+  clearStoredCodexTokens,
+  readStoredCodexTokens,
+  writeStoredCodexTokens,
+} from "../config/settings";
 import { isAirGapped, isLocalProvider, isLocalBaseUrl } from "../config/air-gapped";
 import type { AgentToolProfile } from "./tool-profile";
 import { LLAMA_CPP_MIN_CTX_TOKENS, LLAMA_CPP_RECOMMENDED_CTX_TOKENS } from "./content-limits";
+
+const CODEX_DISCOVERY_REFRESH_WINDOW_MS = 5 * 60 * 1000;
+
+class CodexBackendModelDiscoveryError extends Error {
+  constructor(readonly status: number) {
+    super(`Codex backend model discovery failed: ${status}`);
+  }
+}
 
 export interface AIProvider {
   readonly agentToolProfile: AgentToolProfile;
@@ -178,7 +191,7 @@ async function fetchCodexBackendModels(
 
   const response = await fetch(url.toString(), { headers });
   if (!response.ok) {
-    throw new Error(`Codex backend model discovery failed: ${response.status}`);
+    throw new CodexBackendModelDiscoveryError(response.status);
   }
 
   const payload = (await response.json()) as { models?: unknown };
@@ -196,6 +209,47 @@ async function fetchCodexBackendModels(
       return typeof id === "string" && id.trim() ? id.trim() : null;
     })
     .filter((id): id is string => id !== null);
+}
+
+async function refreshCodexTokensForDiscovery(
+  tokens: CodexOAuthTokens,
+): Promise<CodexOAuthTokens> {
+  try {
+    const fresh = await refreshAccessToken(tokens);
+    writeStoredCodexTokens(fresh);
+    return fresh;
+  } catch (err) {
+    clearStoredCodexTokens();
+    throw err;
+  }
+}
+
+async function getFreshCodexTokensForDiscovery(
+  tokens: CodexOAuthTokens,
+): Promise<CodexOAuthTokens> {
+  if (Date.now() < tokens.expiresAt - CODEX_DISCOVERY_REFRESH_WINDOW_MS) {
+    return tokens;
+  }
+  return refreshCodexTokensForDiscovery(tokens);
+}
+
+async function fetchCodexBackendModelsWithRefresh(
+  tokens: CodexOAuthTokens,
+): Promise<string[]> {
+  const freshTokens = await getFreshCodexTokensForDiscovery(tokens);
+  try {
+    return await fetchCodexBackendModels(freshTokens);
+  } catch (err) {
+    if (
+      err instanceof CodexBackendModelDiscoveryError &&
+      err.status === 401
+    ) {
+      return fetchCodexBackendModels(
+        await refreshCodexTokensForDiscovery(freshTokens),
+      );
+    }
+    throw err;
+  }
 }
 
 async function probeLlamaCppCtxWarning(baseURL: string): Promise<string | undefined> {
@@ -238,7 +292,7 @@ export async function fetchProviderModels(
       throw new Error("Codex provider requires authentication. Connect your ChatGPT account in settings.");
     }
     try {
-      const models = await fetchCodexBackendModels(tokens);
+      const models = await fetchCodexBackendModelsWithRefresh(tokens);
       if (models.length > 0) {
         return okResult({ models });
       }
