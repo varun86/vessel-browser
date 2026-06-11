@@ -117,7 +117,6 @@ async function restoreLocaleSnapshot(
   }
 }
 
-
 /**
  * Extract a meaningful product name from the page, preferring the main H1
  * or heading over the generic site title. Falls back to the page title if
@@ -149,7 +148,6 @@ async function getProductPageTitle(wc: WebContents): Promise<string> {
   return wc.getTitle() || "";
 }
 
-
 export async function buildCartSuccessSuffix(
   wc: WebContents,
   productUrl: string,
@@ -173,7 +171,6 @@ export async function buildCartSuccessSuffix(
     : "";
   return `\n${overlayHint}${actionsSuffix}${cartSummary}`;
 }
-
 
 async function tryAutoDismissCartDialog(wc: WebContents): Promise<string | null> {
   try {
@@ -694,7 +691,6 @@ function describeOverlayState(
     signature: getBlockingOverlaySignature(inventory),
   };
 }
-
 
 /**
  * Try to dismiss consent overlays that live inside iframes (common for
