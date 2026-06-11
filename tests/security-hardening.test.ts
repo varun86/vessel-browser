@@ -22,7 +22,10 @@ import {
   getAirGapBlockReason,
   isLocalBaseUrl,
 } from "../src/main/config/air-gapped";
-import { createCodexFunctionCallOutput } from "../src/main/ai/provider-codex";
+import {
+  CodexProvider,
+  createCodexFunctionCallOutput,
+} from "../src/main/ai/provider-codex";
 import { flushPersist, setSetting } from "../src/main/config/settings";
 import { requiresExplicitMcpApproval } from "../src/main/mcp/server";
 import {
@@ -100,6 +103,22 @@ function withAirGappedForTest<T>(value: boolean, fn: () => T): T {
     restore();
     throw error;
   }
+}
+
+function codexSseResponse(
+  events: Array<Record<string, unknown>>,
+  headers: Record<string, string> = {},
+): Response {
+  return new Response(
+    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+        ...headers,
+      },
+    },
+  );
 }
 
 test("trusted IPC guard rejects unregistered renderer senders", () => {
@@ -537,6 +556,46 @@ test("Codex function call output executes valid supported calls", async () => {
   });
 });
 
+test("Codex function call output repairs aliased scalar tool calls", async () => {
+  const output = await createCodexFunctionCallOutput(
+    {
+      type: "function_call",
+      call_id: "call_alias",
+      name: "open",
+      arguments: JSON.stringify("news.ycombinator.com"),
+    },
+    new Set(["navigate"]),
+    () => undefined,
+    async (name, args) => `${name}:${args.url}`,
+  );
+
+  assert.deepEqual(output, {
+    type: "function_call_output",
+    call_id: "call_alias",
+    output: "navigate:https://news.ycombinator.com",
+  });
+});
+
+test("Codex function call output accepts scalar highlight text", async () => {
+  const output = await createCodexFunctionCallOutput(
+    {
+      type: "function_call",
+      call_id: "call_highlight_scalar",
+      name: "highlight",
+      arguments: JSON.stringify("Solar generates more energy in US than coal for first time"),
+    },
+    new Set(["highlight"]),
+    () => undefined,
+    async (name, args) => `${name}:${args.text}`,
+  );
+
+  assert.deepEqual(output, {
+    type: "function_call_output",
+    call_id: "call_highlight_scalar",
+    output: "highlight:Solar generates more energy in US than coal for first time",
+  });
+});
+
 test("Codex function call output returns tool errors to the model", async () => {
   const output = await createCodexFunctionCallOutput(
     {
@@ -559,4 +618,517 @@ test("Codex function call output returns tool errors to the model", async () => 
   assert.match(output.output, /Tool execution failed/);
   assert.match(output.output, /Script failed to execute/);
   assert.match(output.output, /read_page to refresh context/);
+});
+
+test("Codex agent follow-up pairs function calls with their outputs", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const requestBodies: Array<Record<string, unknown>> = [];
+  let ended = false;
+
+  await withMockFetch(async (_input, init) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestBodies.length === 1) {
+      return codexSseResponse(
+        [
+          {
+            type: "response.output_item.done",
+            item: {
+              type: "function_call",
+              call_id: "call_abc",
+              name: "read_page",
+              arguments: "{}",
+            },
+          },
+        ],
+        { "x-codex-turn-state": "turn-state-1" },
+      );
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "done",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "show me the page",
+      [
+        {
+          name: "read_page",
+          description: "Read the current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      () => undefined,
+      async () => "Page text",
+      () => {
+        ended = true;
+      },
+    ),
+  );
+
+  assert.equal(ended, true);
+  assert.equal(requestBodies.length, 2);
+  assert.deepEqual(requestBodies[1].input, [
+    {
+      type: "function_call",
+      call_id: "call_abc",
+      name: "read_page",
+      arguments: "{}",
+    },
+    {
+      type: "function_call_output",
+      call_id: "call_abc",
+      output: "Page text",
+    },
+  ]);
+});
+
+test("Codex agent recovers text-encoded tool calls", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const requestBodies: Array<Record<string, unknown>> = [];
+  const chunks: string[] = [];
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+
+  await withMockFetch(async (_input, init) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestBodies.length === 1) {
+      return codexSseResponse([
+        {
+          type: "response.output_text.delta",
+          delta: 'read_page [ARGS] {"mode":"visible_only"}',
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "done",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "read the current page",
+      [
+        {
+          name: "read_page",
+          description: "Read the current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async (name, args) => {
+        calls.push({ name, args });
+        return "Page text";
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.deepEqual(calls, [{ name: "read_page", args: { mode: "visible_only" } }]);
+  assert.equal(chunks.includes("<<erase_prev>>"), true);
+  assert.equal(requestBodies.length, 2);
+  assert.deepEqual(requestBodies[1].input, [
+    {
+      type: "function_call",
+      call_id: (requestBodies[1].input as Array<{ call_id?: string }>)[0].call_id,
+      name: "read_page",
+      arguments: '{"mode":"visible_only"}',
+    },
+    {
+      type: "function_call_output",
+      call_id: (requestBodies[1].input as Array<{ call_id?: string }>)[0].call_id,
+      output: "Page text",
+    },
+  ]);
+});
+
+test("Codex agent recovers narrated action tool calls", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+
+  await withMockFetch(async () => {
+    if (calls.length === 0) {
+      return codexSseResponse([
+        {
+          type: "response.output_text.delta",
+          delta: 'Action: search "Hacker News"',
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "done",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "search Hacker News",
+      [
+        {
+          name: "search",
+          description: "Search the web",
+          input_schema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+      ],
+      () => undefined,
+      async (name, args) => {
+        calls.push({ name, args });
+        return "Search complete";
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.deepEqual(calls, [{ name: "search", args: { query: "Hacker News" } }]);
+});
+
+test("Codex agent recovers when it hands off after an intermediate tool", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const requestBodies: Array<Record<string, unknown>> = [];
+  const chunks: string[] = [];
+
+  await withMockFetch(async (_input, init) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestBodies.length === 1) {
+      return codexSseResponse(
+        [
+          {
+            type: "response.output_item.done",
+            item: {
+              type: "function_call",
+              call_id: "call_nav",
+              name: "navigate",
+              arguments: JSON.stringify({ url: "https://news.ycombinator.com" }),
+            },
+          },
+        ],
+        { "x-codex-turn-state": "turn-state-1" },
+      );
+    }
+    if (requestBodies.length === 2) {
+      const followUpInput = requestBodies[1].input as Array<{
+        type: string;
+        role?: string;
+        content?: Array<{ text: string }>;
+      }>;
+      assert.match(
+        followUpInput[followUpInput.length - 1]?.content?.[0]?.text ?? "",
+        /call the highlight tool/i,
+      );
+      return codexSseResponse([
+        {
+          type: "response.output_text.delta",
+          delta:
+            "I'm on the Hacker News front page now.\nIf helpful, I can open or summarize any specific story from it.\nWant me to open one and grab the key points?",
+        },
+      ]);
+    }
+    if (requestBodies.length === 3) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_highlight",
+            name: "highlight",
+            arguments: JSON.stringify({ text: "Show HN: FablePool" }),
+          },
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "I highlighted a high-signal story.",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "Go to Hacker News, identify a few high-signal stories, and highlight them.",
+      [
+        {
+          name: "navigate",
+          description: "Navigate to a URL",
+          input_schema: {
+            type: "object",
+            properties: { url: { type: "string" } },
+            required: ["url"],
+          },
+        },
+        {
+          name: "highlight",
+          description: "Highlight page content",
+          input_schema: {
+            type: "object",
+            properties: { text: { type: "string" } },
+            required: ["text"],
+          },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async (name) =>
+        name === "highlight"
+          ? "Highlighted text: Show HN: FablePool"
+          : "Navigated to https://news.ycombinator.com\nPage title: Hacker News\n[state: url=https://news.ycombinator.com, title=\"Hacker News\", canGoBack=true, canGoForward=false, loading=false]",
+      () => undefined,
+    ),
+  );
+
+  assert.equal(requestBodies.length, 4);
+  assert.equal(chunks.includes("<<erase_prev>>"), true);
+  const recoveryInput = requestBodies[2].input as Array<{
+    type: string;
+    role?: string;
+    content?: Array<{ text: string }>;
+  }>;
+  assert.equal(recoveryInput[0]?.type, "message");
+  assert.equal(recoveryInput[0]?.role, "user");
+  assert.match(recoveryInput[0]?.content?.[0]?.text ?? "", /task is still in progress/i);
+  assert.match(recoveryInput[0]?.content?.[0]?.text ?? "", /Hacker News/i);
+  assert.match(recoveryInput[0]?.content?.[0]?.text ?? "", /highlight tool/i);
+  assert.match(recoveryInput[0]?.content?.[0]?.text ?? "", /Latest browser state/i);
+});
+
+test("Codex agent does not accept highlight completion without highlight tool use", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const requestBodies: Array<Record<string, unknown>> = [];
+  const highlighted: string[] = [];
+
+  await withMockFetch(async (_input, init) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestBodies.length === 1) {
+      return codexSseResponse(
+        [
+          {
+            type: "response.output_item.done",
+            item: {
+              type: "function_call",
+              call_id: "call_read",
+              name: "read_page",
+              arguments: JSON.stringify({ mode: "results_only" }),
+            },
+          },
+        ],
+        { "x-codex-turn-state": "turn-state-1" },
+      );
+    }
+    if (requestBodies.length === 2) {
+      const followUpInput = requestBodies[1].input as Array<{
+        type: string;
+        role?: string;
+        content?: Array<{ text: string }>;
+      }>;
+      assert.match(
+        followUpInput[followUpInput.length - 1]?.content?.[0]?.text ?? "",
+        /call the highlight tool/i,
+      );
+      return codexSseResponse([
+        {
+          type: "response.output_text.delta",
+          delta: "I found and highlighted three high-signal stories.",
+        },
+      ]);
+    }
+    if (requestBodies.length === 3) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_highlight",
+            name: "highlight",
+            arguments: JSON.stringify({ text: "Show HN: FablePool" }),
+          },
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "Done.",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "Highlight the highest signal Hacker News stories.",
+      [
+        {
+          name: "read_page",
+          description: "Read the current page",
+          input_schema: { type: "object", properties: {} },
+        },
+        {
+          name: "highlight",
+          description: "Highlight page content",
+          input_schema: {
+            type: "object",
+            properties: { text: { type: "string" } },
+            required: ["text"],
+          },
+        },
+      ],
+      () => undefined,
+      async (name, args) => {
+        if (name === "highlight" && typeof args.text === "string") {
+          highlighted.push(args.text);
+          return `Highlighted text: ${args.text}`;
+        }
+        return "Results: Show HN: FablePool; Homebrew 6.0.0; MiMo Code\n[state: url=https://news.ycombinator.com, title=\"Hacker News\", canGoBack=true, canGoForward=false, loading=false]";
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.equal(requestBodies.length, 2);
+  assert.deepEqual(highlighted, [
+    "Show HN: FablePool",
+    "Homebrew 6.0.0",
+    "MiMo Code",
+  ]);
+});
+
+test("Codex agent force-highlights story candidates when it tries to hand off", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const highlighted: string[] = [];
+  const chunks: string[] = [];
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  await withMockFetch(async (_input, init) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestBodies.length === 1) {
+      return codexSseResponse(
+        [
+          {
+            type: "response.output_item.done",
+            item: {
+              type: "function_call",
+              call_id: "call_read",
+              name: "read_page",
+              arguments: JSON.stringify({ mode: "results_only" }),
+            },
+          },
+        ],
+        { "x-codex-turn-state": "turn-state-1" },
+      );
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta:
+          "You're currently on the Hacker News homepage with items like:\n\n" +
+          "Lines of code got a better publicist (338 points)\n" +
+          "Solar generates more energy in US than coal for first time (389 points)\n" +
+          "Open Reproduction of DeepSeek-R1 (183 points)\n" +
+          "Software is made between commits (182 points)\n" +
+          "FPS.cob: A first person shooter in COBOL (91 points)\n\n" +
+          "If you want, I can open the top story or search for a topic.",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "Take me to Hacker News and highlight the highest signal stories.",
+      [
+        {
+          name: "read_page",
+          description: "Read the current page",
+          input_schema: { type: "object", properties: {} },
+        },
+        {
+          name: "highlight",
+          description: "Highlight page content",
+          input_schema: {
+            type: "object",
+            properties: { text: { type: "string" } },
+            required: ["text"],
+          },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async (name, args) => {
+        if (name === "highlight" && typeof args.text === "string") {
+          highlighted.push(args.text);
+          return `Highlighted text: ${args.text}`;
+        }
+        return "Results loaded";
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.equal(requestBodies.length, 2);
+  assert.deepEqual(highlighted, [
+    "Lines of code got a better publicist",
+    "Solar generates more energy in US than coal for first time",
+    "Open Reproduction of DeepSeek-R1",
+    "Software is made between commits",
+    "FPS.cob: A first person shooter in COBOL",
+  ]);
+  assert.equal(chunks.some((chunk) => chunk.includes("<<tool:highlight:")), true);
+  assert.equal(chunks.some((chunk) => chunk.includes("Highlighted 5 high-signal stories.")), true);
 });

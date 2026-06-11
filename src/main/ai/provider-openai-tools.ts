@@ -55,7 +55,7 @@ function toLikelyUrl(value: string): string | null {
   const trimmed = value.trim().replace(/^["']|["']$/g, '');
   if (!trimmed) return null;
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^[a-z0-9-]+\.(com|org|net|io|dev|app|ai|co|edu|gov)(\/\S*)?$/i.test(trimmed)) {
+  if (/^(?:[a-z0-9-]+\.)+[a-z]{2,}(\/\S*)?$/i.test(trimmed)) {
     return `https://${trimmed}`;
   }
   return null;
@@ -79,6 +79,7 @@ function scalarArgsForTool(
 
   if (
     name === 'click' ||
+    name === 'highlight' ||
     name === 'inspect_element' ||
     name === 'scroll_to_element'
   ) {
