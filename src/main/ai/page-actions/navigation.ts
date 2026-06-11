@@ -38,7 +38,6 @@ export function getTabByMatch(
   );
 }
 
-
 export function findCheckpoint(
   checkpoints: AgentCheckpoint[],
   args: Record<string, unknown>,
@@ -60,7 +59,6 @@ export function findCheckpoint(
 
   return null;
 }
-
 
 type SearchTargetInfo = {
   selector: string;
@@ -463,4 +461,3 @@ export async function searchPageWithClick(
 
   return `Searched "${query}" (same page — results may have loaded dynamically)${await getPostSearchSummary(wc)}`;
 }
-
