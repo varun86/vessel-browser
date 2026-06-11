@@ -1,7 +1,7 @@
 import { app, dialog, globalShortcut, session } from "electron";
 import fs from "node:fs";
 import path from "path";
-import { createMainWindow, layoutViews } from "./window";
+import { createMainWindow, layoutViews, type WindowState } from "./window";
 import { registerIpcHandlers, togglePictureInPicture } from "./ipc/handlers";
 import { createSecondaryWindow } from "./secondary/window";
 import { Channels } from "../shared/channels";
@@ -43,6 +43,7 @@ import * as autofillManager from "./autofill/manager";
 import * as pageSnapshots from "./content/page-snapshots";
 
 let runtime: AgentRuntime | null = null;
+let windowStateForShutdown: WindowState | null = null;
 
 function configureUserAgent(): void {
   const originalUA = session.defaultSession.getUserAgent();
@@ -170,6 +171,7 @@ async function bootstrap(): Promise<void> {
       runtime?.onTabStateChanged();
     }
   });
+  windowStateForShutdown = windowState;
 
   let didRevealMainWindow = false;
   const revealMainWindow = () => {
@@ -341,7 +343,7 @@ app.whenReady().then(bootstrap).catch((error) => {
     stopBackgroundRevalidation();
     // Dispose runtime and tab manager before persisting to free listeners and memory
     runtime?.dispose();
-    windowState?.tabManager.dispose();
+    windowStateForShutdown?.tabManager.dispose();
     void Promise.all([
       runtime?.flushPersist() ?? Promise.resolve(),
       bookmarkManager.flushPersist(),

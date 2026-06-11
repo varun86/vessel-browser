@@ -4,7 +4,7 @@ import path from "node:path";
 import { app, BrowserWindow } from "electron";
 import { createLogger } from "../shared/logger";
 import { escapeHtml } from "../shared/html-escape";
-import { read, writeFileAtomic, rmSafe } from "./utils/safe-fs";
+import { readIfExists, writeFileAtomic, rmSafe } from "./utils/safe-fs";
 
 const logger = createLogger("Splash");
 
@@ -15,7 +15,7 @@ async function findIconBase64(): Promise<string> {
     path.join(__dirname, "../../resources/vessel-icon.png"),
   ];
   for (const p of candidates) {
-    const data = await read(p, "buffer");
+    const data = await readIfExists(p, "buffer");
     if (data != null) {
       return `data:image/png;base64,${data.toString("base64")}`;
     }
