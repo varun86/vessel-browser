@@ -536,3 +536,27 @@ test("Codex function call output executes valid supported calls", async () => {
     output: "navigate:https://example.com",
   });
 });
+
+test("Codex function call output returns tool errors to the model", async () => {
+  const output = await createCodexFunctionCallOutput(
+    {
+      type: "function_call",
+      call_id: "call_4",
+      name: "read_page",
+      arguments: "{}",
+    },
+    new Set(["read_page"]),
+    () => undefined,
+    async () => {
+      throw new Error(
+        "Script failed to execute, this normally means an error was thrown. Check the renderer console for the error.",
+      );
+    },
+  );
+
+  assert.equal(output.type, "function_call_output");
+  assert.equal(output.call_id, "call_4");
+  assert.match(output.output, /Tool execution failed/);
+  assert.match(output.output, /Script failed to execute/);
+  assert.match(output.output, /read_page to refresh context/);
+});

@@ -112,7 +112,13 @@ export async function createCodexFunctionCallOutput(
     };
   }
 
-  const output = await onToolCall(name, args);
+  let output: string;
+  try {
+    output = await onToolCall(name, args);
+  } catch (toolErr: unknown) {
+    const msg = toolErr instanceof Error ? toolErr.message : String(toolErr);
+    output = `Error: Tool execution failed — ${msg}. Try a different approach or call read_page to refresh context.`;
+  }
   if (output === TERMINAL_TOOL_RESULT) {
     return { terminal: true };
   }
