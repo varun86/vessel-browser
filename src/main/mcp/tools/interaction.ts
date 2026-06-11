@@ -2,19 +2,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AgentRuntime } from "../../agent/runtime";
 import type { TabManager } from "../../tabs/tab-manager";
+// eslint-disable-next-line no-restricted-syntax -- clickResolvedSelector, clearOverlays, dismissPopup, scrollPage are defined in page-actions.ts itself; not yet extracted to sub-modules
+import { clickResolvedSelector, clearOverlays, dismissPopup, scrollPage } from "../../ai/page-actions";
 import {
-  clearOverlays,
-  clickResolvedSelector,
-  dismissPopup,
   focusElement,
   hoverElement,
   pressKeyDirect as pressKey,
-  scrollPage,
   selectOptionDirect as selectOption,
   setElementValue,
   submitFormDirect as submitForm,
   typeKeystroke,
-} from "../../ai/page-actions";
+} from "../../ai/page-actions/interaction";
 import {
   coerceOptionalNumber,
   optionalNumberLikeSchema,

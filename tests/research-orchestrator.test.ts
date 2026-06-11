@@ -7,7 +7,7 @@ import type {
 } from "../src/shared/research-types";
 import { ResearchOrchestrator } from "../src/main/agent/research/orchestrator";
 import type { AIProvider } from "../src/main/ai/provider";
-import { TabMutex } from "../src/main/ai/page-actions";
+import { TabMutex } from "../src/main/ai/page-actions/core";
 import type { AgentRuntime } from "../src/main/agent/runtime";
 import type { TabManager } from "../src/main/tabs/tab-manager";
 

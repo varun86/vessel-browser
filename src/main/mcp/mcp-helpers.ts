@@ -1,5 +1,6 @@
 import { createLogger } from "../../shared/logger";
 import { getErrorMessage } from "../../shared/result";
+// eslint-disable-next-line no-restricted-syntax -- isDangerousAction is defined in page-actions.ts itself; not yet extracted to a sub-module
 import { isDangerousAction } from "../ai/page-actions";
 import { extractContent } from "../content/extractor";
 import { getRecoverableAccessIssue } from "../content/page-access-issues";
@@ -7,7 +8,7 @@ import { assertToolUnlocked } from "../premium/manager";
 import { waitForLoad } from "../utils/webcontents-utils";
 import type { AgentRuntime } from "../agent/runtime";
 import type { TabManager } from "../tabs/tab-manager";
-import { waitForConditionDirect as waitForCondition } from "../ai/page-actions";
+import { waitForConditionDirect as waitForCondition } from "../ai/page-actions/interaction";
 
 const logger = createLogger("MCP");
 

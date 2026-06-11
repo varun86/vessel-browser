@@ -1,7 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AgentRuntime } from "../../agent/runtime";
-import { clickResolvedSelector, fillFormFields, setElementValue, submitFormDirect as submitForm } from "../../ai/page-actions";
+// eslint-disable-next-line no-restricted-syntax -- clickResolvedSelector is defined in page-actions.ts itself; not yet extracted to a sub-module
+import { clickResolvedSelector } from "../../ai/page-actions";
+import {
+  fillFormFields,
+  setElementValue,
+  submitFormDirect as submitForm,
+} from "../../ai/page-actions/interaction";
 import type { TabManager } from "../../tabs/tab-manager";
 import { waitForLoad, waitForPotentialNavigation } from "../../utils/webcontents-utils";
 import { asNoActiveTabResponse, asTextResponse, withAction } from "../mcp-helpers";

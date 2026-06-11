@@ -11,7 +11,7 @@ import {
   buildStructuredContext,
   type ExtractMode,
 } from "../../ai/context-builder";
-import { getTabByMatch } from "../../ai/page-actions";
+import { getTabByMatch } from "../../ai/page-actions/navigation";
 import { MAX_MCP_NAV_CONTENT_LENGTH } from "../../ai/content-limits";
 import { extractContent } from "../../content/extractor";
 import { captureScreenshot } from "../../content/screenshot";

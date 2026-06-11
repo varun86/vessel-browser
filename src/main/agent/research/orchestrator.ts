@@ -15,7 +15,9 @@ import { buildSubAgentSystemPrompt } from "./sub-agent-prompt";
 import { buildSynthesisPrompt } from "./synthesis-prompt";
 import type { AIProvider } from "../../ai/provider";
 import { AGENT_TOOLS } from "../../ai/tools";
-import { executeAction, type ActionContext, TabMutex } from "../../ai/page-actions";
+// eslint-disable-next-line no-restricted-syntax -- executeAction is defined in page-actions.ts itself; not yet extracted to a sub-module
+import { executeAction } from "../../ai/page-actions";
+import { type ActionContext, TabMutex } from "../../ai/page-actions/core";
 import type { TabManager } from "../../tabs/tab-manager";
 import type { AgentRuntime } from "../runtime";
 import { loadSettings } from "../../config/settings";

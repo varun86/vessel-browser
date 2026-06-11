@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AgentRuntime } from "../../agent/runtime";
 import type { TabManager } from "../../tabs/tab-manager";
-import { getTabByMatch } from "../../ai/page-actions";
+import { getTabByMatch } from "../../ai/page-actions/navigation";
 import { validateLinkDestination } from "../../network/link-validation";
 import { assertSafeURL } from "../../network/url-safety";
 import { waitForLoad } from "../../utils/webcontents-utils";

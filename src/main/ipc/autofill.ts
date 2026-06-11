@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AutofillProfile } from "../../shared/autofill-types";
 import { Channels } from "../../shared/channels";
 import { extractContent } from "../content/extractor";
-import { fillFormFields } from "../ai/page-actions";
+import { fillFormFields } from "../ai/page-actions/interaction";
 import * as autofillManager from "../autofill/manager";
 import { matchFields } from "../autofill/matcher";
 import type { WindowState } from "../window";

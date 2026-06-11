@@ -4,9 +4,10 @@ import {
   composeDuplicateBookmarkResponse,
   composeFolderAwareResponse,
   describeFolder,
-  getBookmarkMetadataFromArgs,
   resolveBookmarkFolderTarget,
-} from "../../ai/page-actions";
+} from "../../ai/page-bookmarks";
+// eslint-disable-next-line no-restricted-syntax -- getBookmarkMetadataFromArgs is defined in page-actions.ts itself; not yet extracted to a sub-module
+import { getBookmarkMetadataFromArgs } from "../../ai/page-actions";
 import { resolveBookmarkSourceDraft } from "../../bookmarks/page-source";
 import {
   formatDeadLinkMessage,
