@@ -463,49 +463,60 @@ function shouldRetryCodexToolLoop(
   const trimmed = text.trim().toLowerCase();
   if (!trimmed) return true;
 
-  const handoffSignals = [
-    "if you want",
-    "if helpful",
-    "would you like",
+  // The previous version of this function treated *any* forward-
+  // looking language as a stall signal ("i've navigated", "i'll
+  // now", "want me to", "let me know", etc.). That was wrong — a
+  // model that just successfully navigated and says "I navigated to
+  // the page, now I'll click the result" is doing exactly the right
+  // thing, not stalling. Nudging it to "continue the original task"
+  // with `<<erase_prev>>` would erase the model's natural progress
+  // narrative and confuse it. The new logic only nudges on real
+  // stalls: empty text, an explicit user-question, or the model
+  // giving up entirely (matching the OpenAI/Ollama provider's
+  // `shouldRecoverCompactStall` exit conditions, minus the
+  // forward-looking phrase false positives).
+
+  // A short message with a question mark is the model asking the
+  // user for permission to continue. That's a real stall.
+  if (trimmed.length <= 160 && trimmed.includes("?")) return true;
+
+  // The model is asking the user to choose a direction. Real stall.
+  const askingUserForDirection = [
+    "what are you hoping",
     "what would you like",
+    "how can i help",
+    "would you like me to",
     "want me to",
-    "let me know",
-    "i can:",
-    "i could:",
+    "are you looking for",
+    "any preferences",
+    "should i",
   ];
-  const navigationOnlySignals = [
-    "i've navigated",
-    "i have navigated",
-    "i’ve navigated",
-    "i navigated",
-  ];
-  const futureActionSignals = [
-    "i'll now",
-    "i will now",
-    "next, i'll",
-    "next, i will",
-  ];
-  const completionSignals = [
-    "i highlighted",
-    "i've highlighted",
-    "i have highlighted",
-    "highlighted them",
-    "here are",
-    "i found",
-    "i identified",
-    "summary:",
-    "\n1.",
-    "\n- ",
-  ];
+  if (askingUserForDirection.some((signal) => trimmed.includes(signal))) {
+    return true;
+  }
 
-  const looksComplete = completionSignals.some((signal) => trimmed.includes(signal));
-  if (looksComplete) return false;
+  // The model is saying it cannot proceed (real stall, not a
+  // forward-looking phrase).
+  const cannotProceed = [
+    "i cannot",
+    "i can't",
+    "i'm unable",
+    "i am unable",
+    "i don't have",
+    "i do not have",
+    "since i cannot see",
+    "since i can't see",
+    "cannot see the current page",
+  ];
+  if (cannotProceed.some((signal) => trimmed.includes(signal))) {
+    return true;
+  }
 
-  return (
-    handoffSignals.some((signal) => trimmed.includes(signal)) ||
-    navigationOnlySignals.some((signal) => trimmed.includes(signal)) ||
-    futureActionSignals.some((signal) => trimmed.includes(signal))
-  );
+  // Everything else — including "I will now click the result",
+  // "I've navigated to the airline site", "next, I'll check the
+  // baggage policy", "here are the top 5 results" — is the model
+  // doing its job. Don't nudge it; let it finish.
+  return false;
 }
 
 function buildCodexRecoveryInput(
@@ -536,12 +547,16 @@ function buildCodexFailedClickRecoveryInput(
   latestToolResultPreview: string | null,
 ): CodexInputItem {
   const stateReminder = buildCodexLatestStateReminder(latestToolResultPreview);
+  // Keep the message short: the click did not complete, here's the
+  // current state, take the next step. The previous version
+  // over-prescribed which targets to avoid (filters, sort controls,
+  // snippets, timestamps, non-link text) and which to prefer
+  // (Primary Results, [#N] indexes) — but the model already knows
+  // what it's clicking on. Excessive negative guidance was making
+  // the model spiral through failed clicks in our transcripts.
   const lines = [
     `[System] The previous click did not complete${attemptedTarget ? ` for ${attemptedTarget}` : ""}.`,
-    `Do not retry the same click target${attemptedTarget ? ` (${attemptedTarget})` : ""}; choose a different visible result or refresh the page context instead.`,
-    `If the latest read_page result included Primary Results with [#N] indexes, click a different result link by index.`,
-    `If you do not have result indexes, call read_page(mode="results_only") once before clicking again.`,
-    `Avoid filters, sort controls, snippets, timestamps, and non-link text.`,
+    `Take the next step: try a different target, refresh the page state with read_page, or call inspect_element on the intended element to verify its index and selector.`,
   ];
   if (stateReminder) {
     lines.push(stateReminder);
@@ -862,7 +877,7 @@ export class CodexProvider implements AIProvider {
 
         if (functionCalls.length === 0) {
           if (
-            recoveryCount < 2 &&
+            recoveryCount < 1 &&
             shouldRetryCodexToolLoop(result.text, toolHistoryCount > 0)
           ) {
             recoveryCount += 1;

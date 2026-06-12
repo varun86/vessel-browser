@@ -171,11 +171,15 @@ test(
         // design just continues.
         return codexSseResponse([webSearchCall("call_ws_3", FLIGHT_QUERY)]);
       }
-      // The model eventually gives up and answers naturally.
+      // The model eventually gives up and answers naturally with
+      // a normal "I tried" summary — NOT a stall signal. The new
+      // recovery logic only nudges on real stalls ("I cannot...",
+      // explicit user questions, etc.), so a natural "here is what
+      // I found" final answer should pass through without a nudge.
       return codexSseResponse([
         {
           type: "response.output_text.delta",
-          delta: "I cannot find a flight; please try a different query.",
+          delta: "I searched three times but could not find a flight in this session. Please try again with a different query.",
         },
       ]);
     }, () =>

@@ -1207,6 +1207,10 @@ test("Codex agent recovers after a failed result click", async () => {
   assert.equal(chunks.some((chunk) => chunk.includes("<<tool:click:⚠ failed #12>>")), true);
   const followUpInput = JSON.stringify(requestBodies[1]?.input ?? []);
   assert.match(followUpInput, /previous click did not complete for #12/);
-  assert.match(followUpInput, /click a different result link by index/);
-  assert.match(followUpInput, /read_page\(mode=\\"results_only\\"\)/);
+  // The new (softer) recovery message just says "take the next
+  // step" without prescribing which tool to use. It mentions
+  // read_page and inspect_element as options but does not
+  // explicitly require read_page(mode="results_only").
+  assert.match(followUpInput, /take the next step/i);
+  assert.match(followUpInput, /read_page/);
 });
