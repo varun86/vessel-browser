@@ -2,7 +2,6 @@ import type {
   ActionSource,
   AgentActionEntry,
   AgentRuntimeState,
-  AgentTranscriptEntry,
 } from "../../../shared/types";
 
 const AGENT_ACTIVITY_WINDOW_MS = 6000;
@@ -10,24 +9,6 @@ export const AGENT_RUNNING_STALE_WINDOW_MS = 5 * 60_000;
 
 function isAgentActionSource(source: ActionSource): boolean {
   return source === "ai" || source === "mcp";
-}
-
-function isAgentTranscriptActive(
-  entry: AgentTranscriptEntry,
-  currentTime: number,
-): boolean {
-  if (!isAgentActionSource(entry.source)) return false;
-
-  if (entry.status === "streaming") {
-    const updatedAt = new Date(entry.updatedAt).getTime();
-    if (Number.isNaN(updatedAt)) return true;
-    return currentTime - updatedAt < AGENT_ACTIVITY_WINDOW_MS;
-  }
-
-  const updatedAt = new Date(entry.updatedAt).getTime();
-  if (Number.isNaN(updatedAt)) return false;
-
-  return currentTime - updatedAt < AGENT_ACTIVITY_WINDOW_MS;
 }
 
 function isAgentActionActive(

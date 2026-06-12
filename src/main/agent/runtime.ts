@@ -783,6 +783,9 @@ export class AgentRuntime {
     if (this.state.supervisor.paused) {
       return "Agent execution is paused";
     }
+    if (this.state.supervisor.approvalMode === "auto") {
+      return null;
+    }
     if (requiresApproval) {
       return "Approval required: high-risk action";
     }

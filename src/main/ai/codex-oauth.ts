@@ -75,6 +75,24 @@ function parseTokenExpiry(accessToken: string): number {
   return Date.now() + 3600_000; // default 1h
 }
 
+function resolveTokenExpiry(accessToken: string, expiresIn?: unknown): number {
+  if (
+    typeof expiresIn === "number" &&
+    Number.isFinite(expiresIn) &&
+    expiresIn > 0
+  ) {
+    return Date.now() + expiresIn * 1000;
+  }
+  return parseTokenExpiry(accessToken);
+}
+
+type OAuthTokenResponse = {
+  access_token: string;
+  refresh_token?: string;
+  id_token?: string;
+  expires_in?: number;
+};
+
 /**
  * @deprecated The Codex provider now routes inference through the ChatGPT
  * backend with the OAuth access_token. Kept only for a potential future
@@ -172,14 +190,13 @@ async function exchangeCodeForTokens(
     throw new Error(errorMsg);
   }
 
-  const data = (await response.json()) as {
-    access_token: string;
-    refresh_token: string;
-    id_token: string;
-  };
+  const data = (await response.json()) as OAuthTokenResponse;
+  if (!data.refresh_token || !data.id_token) {
+    throw new Error("Token exchange did not return the expected Codex tokens");
+  }
 
   const claims = parseJwtClaims(data.id_token);
-  const expiresAt = parseTokenExpiry(data.access_token);
+  const expiresAt = resolveTokenExpiry(data.access_token, data.expires_in);
   const tokens: CodexOAuthTokens = {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
@@ -217,15 +234,11 @@ async function refreshAccessToken(
     throw new Error(errorMsg);
   }
 
-  const data = (await response.json()) as {
-    access_token: string;
-    refresh_token?: string;
-    id_token?: string;
-  };
+  const data = (await response.json()) as OAuthTokenResponse;
 
   const idToken = data.id_token || tokens.idToken || "";
   const claims = idToken ? parseJwtClaims(idToken) : null;
-  const expiresAt = parseTokenExpiry(data.access_token);
+  const expiresAt = resolveTokenExpiry(data.access_token, data.expires_in);
   const refreshedTokens: CodexOAuthTokens = {
     accessToken: data.access_token,
     refreshToken: data.refresh_token || tokens.refreshToken,

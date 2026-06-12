@@ -22,7 +22,10 @@ import {
   getAirGapBlockReason,
   isLocalBaseUrl,
 } from "../src/main/config/air-gapped";
-import { createCodexFunctionCallOutput } from "../src/main/ai/provider-codex";
+import {
+  CodexProvider,
+  createCodexFunctionCallOutput,
+} from "../src/main/ai/provider-codex";
 import { flushPersist, setSetting } from "../src/main/config/settings";
 import { requiresExplicitMcpApproval } from "../src/main/mcp/server";
 import {
@@ -100,6 +103,22 @@ function withAirGappedForTest<T>(value: boolean, fn: () => T): T {
     restore();
     throw error;
   }
+}
+
+function codexSseResponse(
+  events: Array<Record<string, unknown>>,
+  headers: Record<string, string> = {},
+): Response {
+  return new Response(
+    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+        ...headers,
+      },
+    },
+  );
 }
 
 test("trusted IPC guard rejects unregistered renderer senders", () => {
@@ -369,19 +388,19 @@ test("premium assertions allow gated tools and features for active premium users
   }
 });
 
-test("download filenames are flattened and contained in the download directory", () => {
+test("download filenames are flattened and contained in the download directory", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vessel-downloads-"));
   try {
     assert.equal(sanitizeDownloadFilename("../secrets.txt"), "secrets.txt");
     assert.equal(sanitizeDownloadFilename("nested\\report.pdf"), "report.pdf");
     assert.equal(sanitizeDownloadFilename(".."), "download");
 
-    const resolved = resolveDownloadPath(tempDir, "../../.ssh/authorized_keys");
+    const resolved = await resolveDownloadPath(tempDir, "../../.ssh/authorized_keys");
     assert.equal(path.dirname(resolved), path.resolve(tempDir));
     assert.equal(path.basename(resolved), "authorized_keys");
 
     fs.writeFileSync(path.join(tempDir, "authorized_keys"), "existing");
-    const collision = resolveDownloadPath(tempDir, "../../.ssh/authorized_keys");
+    const collision = await resolveDownloadPath(tempDir, "../../.ssh/authorized_keys");
     assert.equal(path.dirname(collision), path.resolve(tempDir));
     assert.equal(path.basename(collision), "authorized_keys (1)");
   } finally {
@@ -535,4 +554,663 @@ test("Codex function call output executes valid supported calls", async () => {
     call_id: "call_3",
     output: "navigate:https://example.com",
   });
+});
+
+test("Codex function call output emits tool chips only after execution completes", async () => {
+  const chunks: string[] = [];
+  let resolveTool: ((value: string) => void) | null = null;
+  let markToolStarted: (() => void) | null = null;
+  const started = new Promise<void>((resolve) => {
+    markToolStarted = resolve;
+  });
+  const callPromise = createCodexFunctionCallOutput(
+    {
+      type: "function_call",
+      call_id: "call_delayed",
+      name: "type_text",
+      arguments: JSON.stringify({ text: "cheap flights" }),
+    },
+    new Set(["type_text"]),
+    (chunk) => chunks.push(chunk),
+    async () => {
+      markToolStarted?.();
+      return new Promise<string>((resolveOutput) => {
+        resolveTool = resolveOutput;
+      });
+    },
+  );
+
+  await started;
+  assert.deepEqual(chunks, []);
+
+  resolveTool?.("Typed into: Search with DuckDuckGo = cheap flights");
+  await callPromise;
+
+  assert.equal(chunks.some((chunk) => chunk.includes("<<tool:type_text:cheap flights>>")), true);
+});
+
+test("Codex function call output marks failed executed tools as warning chips", async () => {
+  const chunks: string[] = [];
+  const output = await createCodexFunctionCallOutput(
+    {
+      type: "function_call",
+      call_id: "call_failed_type",
+      name: "type_text",
+      arguments: JSON.stringify({ text: "cheap flights" }),
+    },
+    new Set(["type_text"]),
+    (chunk) => chunks.push(chunk),
+    async () => "Error: No element index or selector provided, and no focused or visible text input could be found.",
+  );
+
+  assert.equal(output.call_id, "call_failed_type");
+  assert.match(output.output, /No element index/);
+  assert.equal(chunks.some((chunk) => chunk.includes("<<tool:type_text:⚠ failed cheap flights>>")), true);
+  assert.equal(chunks.some((chunk) => chunk.includes("<<tool:type_text:cheap flights>>")), false);
+});
+
+test("Codex function call output repairs aliased scalar tool calls", async () => {
+  const output = await createCodexFunctionCallOutput(
+    {
+      type: "function_call",
+      call_id: "call_alias",
+      name: "open",
+      arguments: JSON.stringify("news.ycombinator.com"),
+    },
+    new Set(["navigate"]),
+    () => undefined,
+    async (name, args) => `${name}:${args.url}`,
+  );
+
+  assert.deepEqual(output, {
+    type: "function_call_output",
+    call_id: "call_alias",
+    output: "navigate:https://news.ycombinator.com",
+  });
+});
+
+test("Codex function call output accepts scalar highlight text", async () => {
+  const output = await createCodexFunctionCallOutput(
+    {
+      type: "function_call",
+      call_id: "call_highlight_scalar",
+      name: "highlight",
+      arguments: JSON.stringify("Solar generates more energy in US than coal for first time"),
+    },
+    new Set(["highlight"]),
+    () => undefined,
+    async (name, args) => `${name}:${args.text}`,
+  );
+
+  assert.deepEqual(output, {
+    type: "function_call_output",
+    call_id: "call_highlight_scalar",
+    output: "highlight:Solar generates more energy in US than coal for first time",
+  });
+});
+
+test("Codex function call output returns tool errors to the model", async () => {
+  const output = await createCodexFunctionCallOutput(
+    {
+      type: "function_call",
+      call_id: "call_4",
+      name: "read_page",
+      arguments: "{}",
+    },
+    new Set(["read_page"]),
+    () => undefined,
+    async () => {
+      throw new Error(
+        "Script failed to execute, this normally means an error was thrown. Check the renderer console for the error.",
+      );
+    },
+  );
+
+  assert.equal(output.type, "function_call_output");
+  assert.equal(output.call_id, "call_4");
+  assert.match(output.output, /Tool execution failed/);
+  assert.match(output.output, /Script failed to execute/);
+  assert.match(output.output, /read_page to refresh context/);
+});
+
+test("Codex agent follow-up pairs function calls with their outputs", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const requestBodies: Array<Record<string, unknown>> = [];
+  let ended = false;
+
+  await withMockFetch(async (_input, init) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestBodies.length === 1) {
+      return codexSseResponse(
+        [
+          {
+            type: "response.output_item.done",
+            item: {
+              type: "function_call",
+              call_id: "call_abc",
+              name: "read_page",
+              arguments: "{}",
+            },
+          },
+        ],
+        { "x-codex-turn-state": "turn-state-1" },
+      );
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "done",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "show me the page",
+      [
+        {
+          name: "read_page",
+          description: "Read the current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      () => undefined,
+      async () => "Page text",
+      () => {
+        ended = true;
+      },
+    ),
+  );
+
+  assert.equal(ended, true);
+  assert.equal(requestBodies.length, 2);
+  assert.deepEqual(requestBodies[1].input, [
+    {
+      type: "function_call",
+      call_id: "call_abc",
+      name: "read_page",
+      arguments: "{}",
+    },
+    {
+      type: "function_call_output",
+      call_id: "call_abc",
+      output: "Page text",
+    },
+  ]);
+});
+
+test("Codex agent recovers text-encoded tool calls", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const requestBodies: Array<Record<string, unknown>> = [];
+  const chunks: string[] = [];
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+
+  await withMockFetch(async (_input, init) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestBodies.length === 1) {
+      return codexSseResponse([
+        {
+          type: "response.output_text.delta",
+          delta: 'read_page [ARGS] {"mode":"visible_only"}',
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "done",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "read the current page",
+      [
+        {
+          name: "read_page",
+          description: "Read the current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async (name, args) => {
+        calls.push({ name, args });
+        return "Page text";
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.deepEqual(calls, [{ name: "read_page", args: { mode: "visible_only" } }]);
+  assert.equal(chunks.includes("<<erase_prev>>"), true);
+  assert.equal(requestBodies.length, 2);
+  assert.deepEqual(requestBodies[1].input, [
+    {
+      type: "function_call",
+      call_id: (requestBodies[1].input as Array<{ call_id?: string }>)[0].call_id,
+      name: "read_page",
+      arguments: '{"mode":"visible_only"}',
+    },
+    {
+      type: "function_call_output",
+      call_id: (requestBodies[1].input as Array<{ call_id?: string }>)[0].call_id,
+      output: "Page text",
+    },
+  ]);
+});
+
+test("Codex agent recovers narrated action tool calls", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+
+  await withMockFetch(async () => {
+    if (calls.length === 0) {
+      return codexSseResponse([
+        {
+          type: "response.output_text.delta",
+          delta: 'Action: search "Hacker News"',
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "done",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "search Hacker News",
+      [
+        {
+          name: "search",
+          description: "Search the web",
+          input_schema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+      ],
+      () => undefined,
+      async (name, args) => {
+        calls.push({ name, args });
+        return "Search complete";
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.deepEqual(calls, [{ name: "search", args: { query: "Hacker News" } }]);
+});
+
+test("Codex agent suppresses current-page re-search after successful web search", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const chunks: string[] = [];
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const query = "cheapest flight tomorrow from Portland to San Francisco";
+  let requestCount = 0;
+
+  await withMockFetch(async () => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_web_search",
+            name: "web_search",
+            arguments: JSON.stringify({ query }),
+          },
+        },
+      ]);
+    }
+    if (requestCount === 2) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_site_search",
+            name: "search",
+            arguments: JSON.stringify({ query }),
+          },
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "I found the current search results and will continue from them.",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "can you help me find the cheapest flight for tomorrow from portland to san francisco?",
+      [
+        {
+          name: "web_search",
+          description: "Search the open web",
+          input_schema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+        {
+          name: "search",
+          description: "Search within current site",
+          input_schema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+        {
+          name: "read_page",
+          description: "Read current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async (name, args) => {
+        calls.push({ name, args });
+        return `Web searched "${query}" via default search engine → https://duckduckgo.com/?q=cheapest%20flight%20tomorrow%20from%20Portland%20to%20San%20Francisco
+[state: url=https://duckduckgo.com/?q=cheapest%20flight%20tomorrow%20from%20Portland%20to%20San%20Francisco, title="DuckDuckGo Search"]`;
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.deepEqual(calls, [{ name: "web_search", args: { query } }]);
+  assert.equal(
+    chunks.some((chunk) => chunk.includes("<<tool:search:↻ duplicate suppressed>>")),
+    true,
+  );
+});
+
+test("Codex agent suppresses query-drifted web search after successful web search", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const chunks: string[] = [];
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const requestBodies: Array<Record<string, unknown>> = [];
+  let requestCount = 0;
+
+  await withMockFetch(async (_input, init) => {
+    requestCount += 1;
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestCount === 1) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_web_search",
+            name: "web_search",
+            arguments: JSON.stringify({
+              query: "cheapest flight tomorrow Portland to San Francisco",
+            }),
+          },
+        },
+      ]);
+    }
+    if (requestCount === 2) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_drifted_search",
+            name: "web_search",
+            arguments: JSON.stringify({
+              query: "Portland to San Francisco flights tomorrow cheapest",
+            }),
+          },
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "I will continue from the existing search results.",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "can you help me find the cheapest flight for tomorrow from portland to san francisco?",
+      [
+        {
+          name: "web_search",
+          description: "Search the open web",
+          input_schema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+        {
+          name: "read_page",
+          description: "Read current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async (name, args) => {
+        calls.push({ name, args });
+        return `Web searched "cheapest flight tomorrow Portland to San Francisco" via default search engine → https://duckduckgo.com/?q=cheapest+flight+tomorrow+Portland+to+San+Francisco
+[state: url=https://duckduckgo.com/?q=cheapest+flight+tomorrow+Portland+to+San+Francisco, title="DuckDuckGo Search"]`;
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.deepEqual(calls, [
+    {
+      name: "web_search",
+      args: { query: "cheapest flight tomorrow Portland to San Francisco" },
+    },
+  ]);
+  assert.equal(
+    chunks.some((chunk) => chunk.includes("<<tool:web_search:↻ duplicate suppressed>>")),
+    true,
+  );
+  assert.match(
+    JSON.stringify(requestBodies[2]?.input ?? []),
+    /already performed web_search successfully/,
+  );
+});
+
+test("Codex agent suppresses clear_overlays without an overlay signal", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const chunks: string[] = [];
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const requestBodies: Array<Record<string, unknown>> = [];
+  let requestCount = 0;
+
+  await withMockFetch(async (_input, init) => {
+    requestCount += 1;
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestCount === 1) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_clear",
+            name: "clear_overlays",
+            arguments: "{}",
+          },
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "I will use the page state instead.",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "can you help me find the cheapest flight for tomorrow from portland to san francisco?",
+      [
+        {
+          name: "clear_overlays",
+          description: "Clear blocking overlays",
+          input_schema: { type: "object", properties: {} },
+        },
+        {
+          name: "read_page",
+          description: "Read current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async (name, args) => {
+        calls.push({ name, args });
+        return "No blocking overlays detected";
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.deepEqual(calls, []);
+  assert.equal(
+    chunks.some((chunk) => chunk.includes("<<tool:clear_overlays:↻ duplicate suppressed>>")),
+    true,
+  );
+  assert.match(
+    JSON.stringify(requestBodies[1]?.input ?? []),
+    /No blocking overlay signal is present/,
+  );
+});
+
+test("Codex agent recovers after a failed result click", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const chunks: string[] = [];
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  await withMockFetch(async (_input, init) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestBodies.length === 1) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_click",
+            name: "click",
+            arguments: JSON.stringify({ index: 12 }),
+          },
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "I will recover from the failed click.",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "open the cheapest flight result",
+      [
+        {
+          name: "click",
+          description: "Click an element",
+          input_schema: {
+            type: "object",
+            properties: { index: { type: "number" } },
+            required: ["index"],
+          },
+        },
+        {
+          name: "read_page",
+          description: "Read current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async () =>
+        "Clicked: Result snippet (clicked)\nNote: Page did not change after click. The element may need a different interaction method. Consider read_page or inspect_element.",
+      () => undefined,
+    ),
+  );
+
+  assert.equal(chunks.some((chunk) => chunk.includes("<<tool:click:⚠ failed #12>>")), true);
+  const followUpInput = JSON.stringify(requestBodies[1]?.input ?? []);
+  assert.match(followUpInput, /previous click did not complete for #12/);
+  // The new (softer) recovery message just says "take the next
+  // step" without prescribing which tool to use. It mentions
+  // read_page and inspect_element as options but does not
+  // explicitly require read_page(mode="results_only").
+  assert.match(followUpInput, /take the next step/i);
+  assert.match(followUpInput, /read_page/);
 });

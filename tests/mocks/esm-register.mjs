@@ -1,3 +1,4 @@
+/* global URL */
 import { register } from "node:module";
 
 register(

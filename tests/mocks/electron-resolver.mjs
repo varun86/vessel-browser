@@ -1,3 +1,4 @@
+/* global URL */
 const mockUrl = new URL("./electron.mjs", import.meta.url).href;
 const dompurifyUrl = new URL("./dompurify.mjs", import.meta.url).href;
 

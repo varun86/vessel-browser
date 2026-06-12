@@ -7,6 +7,18 @@ import { writeStoredCodexTokens, clearStoredCodexTokens } from "../config/settin
 import { createLogger } from "../../shared/logger";
 import { getEffectiveMaxIterations } from "../premium/manager";
 import { TERMINAL_TOOL_RESULT } from "./tool-control";
+import { isClickReadLoop, hasRecentDuplicateToolCall } from "./tool-guardrails";
+import { isRichToolResult, type TextBlock } from "./tool-result";
+import {
+  coerceToolArgsForExecution,
+  isTargetlessClickArgs,
+  parseToolArgsWithRepair,
+  recoverNarratedActionToolCalls,
+  recoverTextEncodedToolCalls,
+  resolveToolCallName,
+  stableToolSignature,
+  unsupportedToolHint,
+} from "./provider-openai-tools";
 
 const logger = createLogger("CodexProvider");
 
@@ -62,14 +74,165 @@ interface CodexStreamAccumulation {
 
 type CodexInputItem =
   | { type: "message"; role: string; content: Array<{ type: "input_text" | "output_text"; text: string }> }
+  | { type: "function_call"; call_id: string; name: string; arguments: string }
   | { type: "function_call_output"; call_id: string; output: string };
 
 interface CodexTerminalToolResult {
   terminal: true;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+interface PreparedCodexFunctionCall {
+  callId: string;
+  name: string;
+  args: Record<string, unknown>;
+}
+
+function createCodexToolOutput(
+  callId: string,
+  output: string,
+): CodexInputItem {
+  return {
+    type: "function_call_output",
+    call_id: callId,
+    output,
+  };
+}
+
+function toolResultTextContent(result: string): string {
+  try {
+    const parsed = JSON.parse(result);
+    if (isRichToolResult(parsed)) {
+      return parsed.content
+        .filter((block): block is TextBlock => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+    }
+  } catch {
+    // Not a rich JSON tool result.
+  }
+  return result;
+}
+
+function summarizeToolArg(args: Record<string, unknown>): string {
+  const index =
+    typeof args.index === "number"
+      ? `#${args.index}`
+      : typeof args.index === "string" && args.index.trim()
+        ? `#${args.index.trim()}`
+        : "";
+  return [args.url, args.query, args.text, args.selector, index, args.direction]
+    .map((value): string => typeof value === "string" ? value : "")
+    .find((value) => value.length > 0) ?? "";
+}
+
+function looksLikeFailedToolOutput(output: string): boolean {
+  const normalized = output.trim().toLowerCase();
+  return (
+    normalized.startsWith("error") ||
+    normalized.startsWith("warning") ||
+    normalized.startsWith("target") ||
+    normalized.startsWith("no active tab") ||
+    normalized.includes("same page — results may have loaded dynamically") ||
+    normalized.includes("could not ") ||
+    normalized.includes("did not ")
+  );
+}
+
+function emitCodexToolChunk(
+  onChunk: (text: string) => void,
+  name: string,
+  args: Record<string, unknown>,
+  output: string,
+): void {
+  const summary = summarizeToolArg(args);
+  const argSummary = looksLikeFailedToolOutput(output)
+    ? ["⚠ failed", summary].filter(Boolean).join(" ")
+    : summary;
+  onChunk(`\n<<tool:${name}${argSummary ? ":" + argSummary : ""}>>\n`);
+}
+
+function prepareCodexFunctionCall(
+  functionCall: CodexOutputItem,
+  availableToolNames: ReadonlySet<string>,
+  onChunk: (text: string) => void,
+): { prepared: PreparedCodexFunctionCall } | { output: CodexInputItem } {
+  const callId = functionCall.call_id || functionCall.id || "";
+  const rawName = functionCall.name || "";
+  const argsJson = functionCall.arguments || "{}";
+
+  if (!callId) {
+    return {
+      output: createCodexToolOutput(
+        callId,
+        "Error: Function call was missing a call_id. Please retry the tool call.",
+      ),
+    };
+  }
+
+  const available = new Set(availableToolNames);
+  const preliminaryArgs =
+    parseToolArgsWithRepair(rawName, argsJson)?.args ?? {};
+  const name = resolveToolCallName(rawName, preliminaryArgs, available);
+
+  if (!name || !available.has(name)) {
+    onChunk(`\n<<tool:${rawName || "unknown"}:⚠ unsupported>>\n`);
+    return {
+      output: createCodexToolOutput(
+        callId,
+        `Error: Unsupported tool${rawName ? `: ${rawName}` : ""}. ${unsupportedToolHint(rawName || name || "unknown")}`,
+      ),
+    };
+  }
+
+  const repaired = parseToolArgsWithRepair(name, argsJson);
+  if (!repaired) {
+    onChunk(`\n<<tool:${name}:⚠ invalid args>>\n`);
+    return {
+      output: createCodexToolOutput(
+        callId,
+        "Error: Invalid JSON in tool arguments. Please retry with a valid JSON object.",
+      ),
+    };
+  }
+
+  const args = coerceToolArgsForExecution(name, repaired.args);
+  if (name === "click" && isTargetlessClickArgs(args)) {
+    onChunk(`\n<<tool:${name}:⚠ missing target>>\n`);
+    return {
+      output: createCodexToolOutput(
+        callId,
+        `Error: click requires an element target. Use click with {"index": N} from the latest read_page result, or {"text": "exact visible link/button text"}. If you do not have a current result index, call read_page(mode="results_only") first and then click exactly one result.`,
+      ),
+    };
+  }
+
+  return {
+    prepared: {
+      callId,
+      name,
+      args,
+    },
+  };
+}
+
+async function executePreparedCodexFunctionCall(
+  prepared: PreparedCodexFunctionCall,
+  onChunk: (text: string) => void,
+  onToolCall: (name: string, args: Record<string, unknown>) => Promise<string>,
+): Promise<CodexInputItem | CodexTerminalToolResult> {
+  let output: string;
+  try {
+    output = await onToolCall(prepared.name, prepared.args);
+  } catch (toolErr: unknown) {
+    const msg = toolErr instanceof Error ? toolErr.message : String(toolErr);
+    output = `Error: Tool execution failed — ${msg}. Try a different approach or call read_page to refresh context.`;
+  }
+  if (output === TERMINAL_TOOL_RESULT) {
+    return { terminal: true };
+  }
+  const textOutput = toolResultTextContent(output);
+  emitCodexToolChunk(onChunk, prepared.name, prepared.args, textOutput);
+  return createCodexToolOutput(prepared.callId, textOutput);
 }
 
 export async function createCodexFunctionCallOutput(
@@ -78,48 +241,330 @@ export async function createCodexFunctionCallOutput(
   onChunk: (text: string) => void,
   onToolCall: (name: string, args: Record<string, unknown>) => Promise<string>,
 ): Promise<CodexInputItem | CodexTerminalToolResult> {
+  const prepared = prepareCodexFunctionCall(
+    functionCall,
+    availableToolNames,
+    onChunk,
+  );
+  if ("output" in prepared) return prepared.output;
+  return executePreparedCodexFunctionCall(prepared.prepared, onChunk, onToolCall);
+}
+
+function createCodexFunctionCallInput(functionCall: CodexOutputItem): CodexInputItem | null {
   const callId = functionCall.call_id || functionCall.id || "";
   const name = functionCall.name || "";
+  if (!callId || !name) return null;
+  return {
+    type: "function_call",
+    call_id: callId,
+    name,
+    arguments: functionCall.arguments || "{}",
+  };
+}
 
-  if (!callId) {
-    return {
-      type: "function_call_output",
-      call_id: callId,
-      output: "Error: Function call was missing a call_id. Please retry the tool call.",
-    };
+function previewToolResult(text: string, maxLength = 800): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength)}...`;
+}
+
+function normalizedSearchToolQuery(
+  name: string,
+  args: Record<string, unknown>,
+): string | null {
+  if (name !== "search" && name !== "web_search") return null;
+  const raw =
+    typeof args.query === "string"
+      ? args.query
+      : typeof args.text === "string"
+        ? args.text
+        : typeof args.term === "string"
+          ? args.term
+          : "";
+  const normalized = raw.replace(/\s+/g, " ").trim().toLowerCase();
+  return normalized || null;
+}
+
+function hasBlockingOverlaySignal(text: string | null): boolean {
+  if (!text) return false;
+  if (/\bno blocking overlays detected\b/i.test(text)) return false;
+  return (
+    /\bwarning:\s*blocking overlay detected\b/i.test(text) ||
+    /\bblocked-by-overlay\b/i.test(text) ||
+    /###\s*immediate blockers\b/i.test(text) ||
+    /\bblocking overlays\W+[1-9]\d*\b/i.test(text)
+  );
+}
+
+function buildCodexLatestStateReminder(toolResultPreview: string | null): string {
+  const text = (toolResultPreview || "").trim();
+  if (!text) return "";
+
+  const existingReminder = text.match(
+    /\bLatest browser state:\s*URL\s+.+?(?:Trust the latest tool result over the initial page context\.|$)/i,
+  )?.[0]?.trim();
+  if (existingReminder) return existingReminder;
+
+  const stateMatch = text.match(
+    /\[state:\s+url=([^,\]\n]+),\s+title=(?:"([^"]*)"|([^,\]\n]+))/i,
+  );
+  if (stateMatch) {
+    const url = stateMatch[1]?.trim();
+    const title = (stateMatch[2] ?? stateMatch[3] ?? "").trim();
+    if (url) {
+      return `Latest browser state: URL ${url}${title ? `, title "${title}"` : ""}. Trust the latest tool result over the initial page context.`;
+    }
   }
 
-  if (!name || !availableToolNames.has(name)) {
-    onChunk(`\n<<tool:${name || "unknown"}:⚠ unsupported>>\n`);
-    return {
-      type: "function_call_output",
-      call_id: callId,
-      output: `Error: Unsupported tool${name ? `: ${name}` : ""}. Use one of the provided tools.`,
-    };
+  const navigatedUrl =
+    text.match(/\b(?:navigated to|went back to|went forward to)\s+([^\s\n]+)/i)?.[1]?.trim() ??
+    text.match(/\b(?:web\s+)?searched "[^"]+"[^\n]*?(?:->|→)\s+([^\s\n]+)/i)?.[1]?.trim();
+  const pageTitle = text.match(/\bPage title:\s*([^\n]+)/i)?.[1]?.trim();
+  if (navigatedUrl) {
+    return `Latest browser state: URL ${navigatedUrl}${pageTitle ? `, title "${pageTitle}"` : ""}. Trust the latest tool result over the initial page context.`;
   }
 
-  let args: Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(functionCall.arguments || "{}");
-    if (!isRecord(parsed)) throw new Error("Tool arguments must be a JSON object");
-    args = parsed;
-  } catch {
-    onChunk(`\n<<tool:${name}:⚠ invalid args>>\n`);
-    return {
-      type: "function_call_output",
-      call_id: callId,
-      output: "Error: Invalid JSON in tool arguments. Please retry with a valid JSON object.",
-    };
+  return "";
+}
+
+/**
+ * Build a strict, actionable error for a repeated search (same query on
+ * `web_search` or `search` already succeeded, or a different-query `web_search`
+ * is a drift from an earlier successful web search). The message names the
+ * previous tool + query verbatim, points the model at the current page, and
+ * tells it explicitly that the prior search results are sufficient — i.e.
+ * the model must use the results it already has, not re-read the page in
+ * preparation for a "better" search (a pattern the model otherwise games by
+ * alternating web_search → read_page → web_search).
+ */
+function buildCodexRepeatedSearchError(
+  previousTool: string,
+  previousQuery: string,
+  latestToolResultPreview: string | null,
+  mode: "repeated" | "drifted",
+): string {
+  const stateReminder = buildCodexLatestStateReminder(latestToolResultPreview);
+  const header =
+    mode === "drifted"
+      ? `Error: You already performed ${previousTool} successfully for this task.`
+      : `Error: You already searched for "${previousQuery}" successfully with ${previousTool}.`;
+  const lines = [
+    header,
+    mode === "drifted"
+      ? `Do not rewrite or broaden the query with another ${previousTool}. The latest results from your previous ${previousTool} are already in the conversation context.`
+      : `Do not search the same query again with ${previousTool} (or its alias search/web_search). The latest results from your previous ${previousTool} are already in the conversation context.`,
+    // The key change: do NOT suggest read_page as a "recovery" action.
+    // The model was using read_page as a no-op to reset the strike counter
+    // and then issue another web_search. The prior results are sufficient.
+    `Take the next action from the results you already have: click a result link, call inspect_element on a specific item, highlight, or provide the final answer to the user. Do not call any search tool again, and do not call read_page as preparation for another search.`,
+  ];
+  if (stateReminder) {
+    lines.push(stateReminder);
+  }
+  return lines.join(" ");
+}
+
+/**
+ * Build a strict, actionable error for a fabricated clear_overlays call
+ * (no blocking overlay signal in the system prompt or latest tool result).
+ */
+function buildCodexUnsupportedClearOverlayError(
+  latestToolResultPreview: string | null,
+): string {
+  const stateReminder = buildCodexLatestStateReminder(latestToolResultPreview);
+  const lines = [
+    `Error: No blocking overlay signal is present in the latest browser state.`,
+    `Do not call clear_overlays unless read_page or the page context explicitly reports a blocking overlay.`,
+    `Continue with read_page, inspect_element, click, or provide the final answer. Do not call clear_overlays again.`,
+  ];
+  if (stateReminder) {
+    lines.push(stateReminder);
+  }
+  return lines.join(" ");
+}
+
+/**
+ * True if a tool call represents *real forward progress* on the task — i.e.
+ * it changes the page state or acts on specific page content. Used to gate
+ * whether a successful tool call resets the dedup strike counters.
+ *
+ * Pure observation tools (read_page, screenshot, current_tab, list_*,
+ * metrics) are NOT included: they let a model game the strike counter by
+ * alternating `web_search → read_page → web_search` and never actually
+ * advancing. A real forward-progress action (click, navigate, type_text,
+ * save_bookmark, etc.) means the model has used the prior search result
+ * in some way, so a future duplicate search is no longer the same stuck
+ * pattern.
+ *
+ * Source of truth: src/main/ai/page-actions/orchestrator.ts switch.
+ */
+function isRealProgressTool(name: string): boolean {
+  return REAL_PROGRESS_TOOLS.has(name);
+}
+
+const REAL_PROGRESS_TOOLS = new Set<string>([
+  // Page navigation / state change
+  "navigate",
+  "go_back",
+  "go_forward",
+  "reload",
+  "create_tab",
+  "switch_tab",
+  // Page interaction
+  "click",
+  "inspect_element",
+  "type_text",
+  "select_option",
+  "submit_form",
+  "fill_form",
+  "press_key",
+  "scroll",
+  "scroll_to_element",
+  "hover",
+  "focus",
+  "paginate",
+  "login",
+  "accept_cookies",
+  "dismiss_popup",
+  "clear_overlays",
+  "set_ad_blocking",
+  "extract_table",
+  // Annotations + bookmarks
+  "highlight",
+  "clear_highlights",
+  "save_bookmark",
+  "create_bookmark_folder",
+  "organize_bookmark",
+  "archive_bookmark",
+  "open_bookmark",
+  // Wait conditions (the model is waiting for a real state change)
+  "wait_for",
+  "wait_for_navigation",
+  // Session / checkpoint actions are real user intent
+  "create_checkpoint",
+  "restore_checkpoint",
+  "save_session",
+  "load_session",
+  "delete_session",
+  "undo_last_action",
+  // Flow + suggest are explicit user-driven actions
+  "flow_start",
+  "flow_advance",
+  "flow_end",
+  "suggest",
+]);
+
+function shouldRetryCodexToolLoop(
+  text: string,
+  hasToolHistory: boolean,
+): boolean {
+  if (!hasToolHistory) return false;
+
+  const trimmed = text.trim().toLowerCase();
+  if (!trimmed) return true;
+
+  // The previous version of this function treated *any* forward-
+  // looking language as a stall signal ("i've navigated", "i'll
+  // now", "want me to", "let me know", etc.). That was wrong — a
+  // model that just successfully navigated and says "I navigated to
+  // the page, now I'll click the result" is doing exactly the right
+  // thing, not stalling. Nudging it to "continue the original task"
+  // with `<<erase_prev>>` would erase the model's natural progress
+  // narrative and confuse it. The new logic only nudges on real
+  // stalls: empty text, an explicit user-question, or the model
+  // giving up entirely (matching the OpenAI/Ollama provider's
+  // `shouldRecoverCompactStall` exit conditions, minus the
+  // forward-looking phrase false positives).
+
+  // A short message with a question mark is the model asking the
+  // user for permission to continue. That's a real stall.
+  if (trimmed.length <= 160 && trimmed.includes("?")) return true;
+
+  // The model is asking the user to choose a direction. Real stall.
+  const askingUserForDirection = [
+    "what are you hoping",
+    "what would you like",
+    "how can i help",
+    "would you like me to",
+    "want me to",
+    "are you looking for",
+    "any preferences",
+    "should i",
+  ];
+  if (askingUserForDirection.some((signal) => trimmed.includes(signal))) {
+    return true;
   }
 
-  const output = await onToolCall(name, args);
-  if (output === TERMINAL_TOOL_RESULT) {
-    return { terminal: true };
+  // The model is saying it cannot proceed (real stall, not a
+  // forward-looking phrase).
+  const cannotProceed = [
+    "i cannot",
+    "i can't",
+    "i'm unable",
+    "i am unable",
+    "i don't have",
+    "i do not have",
+    "since i cannot see",
+    "since i can't see",
+    "cannot see the current page",
+  ];
+  if (cannotProceed.some((signal) => trimmed.includes(signal))) {
+    return true;
+  }
+
+  // Everything else — including "I will now click the result",
+  // "I've navigated to the airline site", "next, I'll check the
+  // baggage policy", "here are the top 5 results" — is the model
+  // doing its job. Don't nudge it; let it finish.
+  return false;
+}
+
+function buildCodexRecoveryInput(
+  userMessage: string,
+  assistantText: string,
+  latestToolResultPreview: string | null,
+): CodexInputItem {
+  const stateReminder = buildCodexLatestStateReminder(latestToolResultPreview);
+  const lines = [
+    `[System] The task is still in progress: ${userMessage}`,
+    `Do not ask the user what they want next unless the original request is genuinely ambiguous or blocked.`,
+    `Your last response stopped after an intermediate browser action: ${previewToolResult(assistantText, 500) || "(no assistant text)"}`,
+    `Continue the original task by choosing the next supported browser tool now.`,
+  ];
+  if (stateReminder) {
+    lines.push(stateReminder);
+  }
+
+  return {
+    type: "message",
+    role: "user",
+    content: [{ type: "input_text", text: lines.join("\n") }],
+  };
+}
+
+function buildCodexFailedClickRecoveryInput(
+  attemptedTarget: string,
+  latestToolResultPreview: string | null,
+): CodexInputItem {
+  const stateReminder = buildCodexLatestStateReminder(latestToolResultPreview);
+  // Keep the message short: the click did not complete, here's the
+  // current state, take the next step. The previous version
+  // over-prescribed which targets to avoid (filters, sort controls,
+  // snippets, timestamps, non-link text) and which to prefer
+  // (Primary Results, [#N] indexes) — but the model already knows
+  // what it's clicking on. Excessive negative guidance was making
+  // the model spiral through failed clicks in our transcripts.
+  const lines = [
+    `[System] The previous click did not complete${attemptedTarget ? ` for ${attemptedTarget}` : ""}.`,
+    `Take the next step: try a different target, refresh the page state with read_page, or call inspect_element on the intended element to verify its index and selector.`,
+  ];
+  if (stateReminder) {
+    lines.push(stateReminder);
   }
   return {
-    type: "function_call_output",
-    call_id: callId,
-    output,
+    type: "message",
+    role: "user",
+    content: [{ type: "input_text", text: lines.join("\n") }],
   };
 }
 
@@ -132,7 +577,7 @@ export class CodexProvider implements AIProvider {
   constructor(tokens: CodexOAuthTokens, model: string) {
     this.tokens = tokens;
     this.model = model;
-    this.agentToolProfile = "default";
+    this.agentToolProfile = "compact";
   }
 
   private async ensureFreshTokens(): Promise<void> {
@@ -367,6 +812,25 @@ export class CodexProvider implements AIProvider {
 
     let currentInput = this.buildInput(userMessage, history);
     let turnState: string | null = null;
+    let toolHistoryCount = 0;
+    let recoveryCount = 0;
+    let correctionCount = 0;
+    const recentToolSignatures: string[] = [];
+    const recentToolNames: string[] = [];
+    let clickReadLoopNudged = false;
+    let latestToolResultPreview: string | null = null;
+    const recentSuccessfulSearchQueries: string[] = [];
+    const recentSuccessfulSearchToolByQuery = new Map<string, string>();
+    // Track the LAST successful web_search query (or null if the last
+    // real-progress action was something else). This drives the "drifted
+    // search" check below — which only fires when a *new* web_search comes
+    // in with no real progress since the previous one. Real progress
+    // (navigate, click, inspect, etc.) nulls this out, so a model doing
+    // a legitimately distinct search several turns after its first one
+    // is NOT treated as drifting. This is the fix for the false positive
+    // where a session-long counter flagged *every* new web_search as
+    // drift and the loop terminated after a single strike.
+    let lastSuccessfulWebSearchQuery: string | null = null;
 
     try {
       for (let i = 0; i < maxIterations; i++) {
@@ -386,22 +850,172 @@ export class CodexProvider implements AIProvider {
 
         turnState = result.turnState || turnState;
 
-        const functionCalls = result.items.filter(
+        let functionCalls: CodexOutputItem[] = result.items.filter(
           (item): item is CodexOutputItem & { type: "function_call" } =>
             item.type === "function_call",
         );
 
         if (functionCalls.length === 0) {
-          break;
+          const recoveredTextCalls = recoverTextEncodedToolCalls(
+            result.text,
+            availableToolNames,
+          );
+          const recoveredCalls =
+            recoveredTextCalls.length > 0
+              ? recoveredTextCalls
+              : recoverNarratedActionToolCalls(result.text, availableToolNames);
+          if (recoveredCalls.length > 0) {
+            if (result.text.trim()) onChunk("<<erase_prev>>");
+            functionCalls = recoveredCalls.map((toolCall) => ({
+              type: "function_call",
+              call_id: toolCall.id,
+              name: toolCall.name,
+              arguments: toolCall.argsJson,
+            }));
+          }
         }
 
-        // The Codex backend tracks conversation state via x-codex-turn-state,
-        // so follow-up requests only need to supply the function_call_output items.
+        if (functionCalls.length === 0) {
+          if (
+            recoveryCount < 1 &&
+            shouldRetryCodexToolLoop(result.text, toolHistoryCount > 0)
+          ) {
+            recoveryCount += 1;
+            if (result.text.trim()) onChunk("<<erase_prev>>");
+            currentInput = [
+              buildCodexRecoveryInput(
+                userMessage,
+                result.text,
+                latestToolResultPreview,
+              ),
+            ];
+            continue;
+          }
+          break;
+        }
+        recoveryCount = 0;
+
         currentInput = [];
         for (const fc of functionCalls) {
-          const output = await createCodexFunctionCallOutput(
+          const functionCallInput = createCodexFunctionCallInput(fc);
+          if (functionCallInput) {
+            currentInput.push(functionCallInput);
+          }
+          const prepared = prepareCodexFunctionCall(
             fc,
             availableToolNames,
+            onChunk,
+          );
+          if ("output" in prepared) {
+            currentInput.push(prepared.output);
+            latestToolResultPreview = previewToolResult(prepared.output.output);
+            correctionCount += 1;
+            continue;
+          }
+
+          const toolSignature = stableToolSignature(
+            prepared.prepared.name,
+            prepared.prepared.args,
+          );
+          const searchToolQuery = normalizedSearchToolQuery(
+            prepared.prepared.name,
+            prepared.prepared.args,
+          );
+          const isRepeatedSearchAcrossTools =
+            searchToolQuery !== null &&
+            recentSuccessfulSearchQueries.includes(searchToolQuery);
+          // A "drifted" web_search is a new web_search whose query is
+          // different from the *immediately preceding* successful
+          // web_search, AND no real progress happened in between. We
+          // check `lastSuccessfulWebSearchQuery` (set on a successful
+          // web_search, cleared by any other real-progress action) so a
+          // model that issues a distinct web_search several turns after
+          // a different one — with click/navigate/inspect in between
+          // — is NOT flagged. The previous design used a session-long
+          // counter (`successfulWebSearchCount > 0`) and fired on the
+          // first distinct web_search in the whole session, terminating
+          // the loop after a single strike even when the model was
+          // doing legitimate research.
+          const isQueryDriftedWebSearch =
+            prepared.prepared.name === "web_search" &&
+            lastSuccessfulWebSearchQuery !== null &&
+            searchToolQuery !== null &&
+            searchToolQuery !== lastSuccessfulWebSearchQuery;
+          const isUnsupportedClearOverlay =
+            prepared.prepared.name === "clear_overlays" &&
+            !hasBlockingOverlaySignal(
+              `${systemPrompt}\n${latestToolResultPreview || ""}`,
+            );
+          if (
+            isRepeatedSearchAcrossTools ||
+            isQueryDriftedWebSearch
+          ) {
+            onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
+            const previousTool = isRepeatedSearchAcrossTools
+              ? (recentSuccessfulSearchToolByQuery.get(searchToolQuery ?? "") ??
+                (prepared.prepared.name === "web_search" ? "search" : "web_search"))
+              : "web_search";
+            // For repeated searches, name the prior query verbatim so
+            // the model can see what it already searched for. For drifted
+            // searches, name the prior successful web_search so the model
+            // can pick a meaningfully different direction (or recognize
+            // that the prior search results are sufficient).
+            const previousQuery = isRepeatedSearchAcrossTools
+              ? (searchToolQuery ?? "")
+              : (lastSuccessfulWebSearchQuery ?? "");
+            const mode: "repeated" | "drifted" = isRepeatedSearchAcrossTools
+              ? "repeated"
+              : "drifted";
+            const output = createCodexToolOutput(
+              prepared.prepared.callId,
+              buildCodexRepeatedSearchError(
+                previousTool,
+                previousQuery,
+                latestToolResultPreview,
+                mode,
+              ),
+            );
+            currentInput.push(output);
+            latestToolResultPreview = previewToolResult(output.output);
+            correctionCount += 1;
+            continue;
+          }
+          if (isUnsupportedClearOverlay) {
+            onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
+            const output = createCodexToolOutput(
+              prepared.prepared.callId,
+              buildCodexUnsupportedClearOverlayError(latestToolResultPreview),
+            );
+            currentInput.push(output);
+            latestToolResultPreview = previewToolResult(output.output);
+            correctionCount += 1;
+            continue;
+          }
+          if (
+            ![
+              "read_page",
+              "current_tab",
+              "inspect_element",
+              "screenshot",
+              "go_back",
+              "go_forward",
+              "click",
+            ].includes(prepared.prepared.name) &&
+            hasRecentDuplicateToolCall(recentToolSignatures, toolSignature)
+          ) {
+            onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
+            const output = createCodexToolOutput(
+              prepared.prepared.callId,
+              `Error: Repeated the same tool call (${prepared.prepared.name}) with the same arguments twice in a row. Do not repeat it. Continue with the next logical step for the original task.`,
+            );
+            currentInput.push(output);
+            latestToolResultPreview = previewToolResult(output.output);
+            correctionCount += 1;
+            continue;
+          }
+
+          const output = await executePreparedCodexFunctionCall(
+            prepared.prepared,
             onChunk,
             onToolCall,
           );
@@ -409,6 +1023,115 @@ export class CodexProvider implements AIProvider {
             return;
           }
           currentInput.push(output);
+          toolHistoryCount += 1;
+          latestToolResultPreview = previewToolResult(output.output);
+          const outputText = toolResultTextContent(output.output);
+          // A real-progress tool call clears the dedup strikes for that
+          // category — but ONLY for tools that actually change or act on
+          // the page. Pure observation tools (read_page, screenshot,
+          // current_tab) do not reset, because the model can otherwise
+          // game the strike counter by alternating
+          //   web_search → (suppressed) → read_page → web_search
+          // and never actually advance. A real forward-progress action
+          // (click, navigate, inspect_element, highlight, save_bookmark,
+          // etc.) means the model has used the prior search result in
+          // some way, so a future duplicate search is no longer the same
+          // stuck pattern. The same real-progress block also clears
+          // `lastSuccessfulWebSearchQuery` so a fresh web_search several
+          // turns after the original (with intervening clicks/navigates/inspects)
+          // is NOT treated as drift.
+          if (!looksLikeFailedToolOutput(outputText)) {
+            if (isRealProgressTool(prepared.prepared.name)) {
+              // A real-progress tool (navigate, click, inspect, etc.)
+              // nulls out the drift anchor so a subsequent distinct
+              // web_search is not flagged as drift. We don't have any
+              // strike counters to reset here — dedup is now purely
+              // informative (the model gets an error and tries again).
+              lastSuccessfulWebSearchQuery = null;
+            }
+          }
+          if (
+            searchToolQuery &&
+            !looksLikeFailedToolOutput(outputText) &&
+            !recentSuccessfulSearchQueries.includes(searchToolQuery)
+          ) {
+            recentSuccessfulSearchQueries.push(searchToolQuery);
+            recentSuccessfulSearchToolByQuery.set(
+              searchToolQuery,
+              prepared.prepared.name,
+            );
+            if (recentSuccessfulSearchQueries.length > 4) {
+              const dropped = recentSuccessfulSearchQueries.shift();
+              if (dropped) {
+                recentSuccessfulSearchToolByQuery.delete(dropped);
+              }
+            }
+          }
+          if (
+            prepared.prepared.name === "web_search" &&
+            !looksLikeFailedToolOutput(outputText)
+          ) {
+            // Record the prior successful web_search query so the next
+            // web_search can be checked for drift against it. Cleared by
+            // any real-progress tool, so a model that searches → clicks
+            // → searches (different query) is NOT flagged as drifting.
+            if (searchToolQuery) {
+              lastSuccessfulWebSearchQuery = searchToolQuery;
+            }
+          }
+          if (
+            prepared.prepared.name === "click" &&
+            looksLikeFailedToolOutput(outputText)
+          ) {
+            // Push a recovery hint so the model knows the click did not
+            // complete and is steered toward a different target. The
+            // model is free to retry the same target if it really
+            // wants to — we just don't terminate the loop on retries,
+            // matching the OpenAI/Ollama provider's "tell the model
+            // it's wrong and let it try again" philosophy.
+            currentInput.push(
+              buildCodexFailedClickRecoveryInput(
+                summarizeToolArg(prepared.prepared.args),
+                latestToolResultPreview,
+              ),
+            );
+          }
+          recentToolSignatures.push(toolSignature);
+          if (recentToolSignatures.length > 4) {
+            recentToolSignatures.shift();
+          }
+          recentToolNames.push(prepared.prepared.name);
+          if (recentToolNames.length > 8) recentToolNames.shift();
+          if (
+            !clickReadLoopNudged &&
+            recentToolNames.length >= 6 &&
+            isClickReadLoop(recentToolNames)
+          ) {
+            clickReadLoopNudged = true;
+            currentInput.push({
+              type: "message",
+              role: "user",
+              content: [{
+                type: "input_text",
+                text:
+                  `[System] You are alternating between click and read_page without advancing the task. ` +
+                  `The click result already includes a page snapshot when it navigates, so do not read_page after every click. ` +
+                  `If you need detail on a specific element, use inspect_element. Otherwise continue the original task directly.`,
+              }],
+            });
+          }
+          correctionCount = 0;
+        }
+        if (correctionCount >= 2) {
+          currentInput.push({
+            type: "message",
+            role: "user",
+            content: [{
+              type: "input_text",
+              text:
+                `[System] You are calling unsupported, malformed, or repeated tools. Stop inventing tool names or repeating actions. Use the supported browser tools to take the next concrete step for the original task.`,
+            }],
+          });
         }
       }
       if (iterationsUsed >= maxIterations) {

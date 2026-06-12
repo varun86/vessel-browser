@@ -420,12 +420,6 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
       const kits = [...BUNDLED_KITS, ...installedKits];
       const invocation = parseSkillSlashInvocation(prompt, kits);
       if (invocation) {
-        if (!invocation.task) {
-          const [command] = prompt.split(/\s+/);
-          setChatCommandError(`Add instructions after ${command}.`);
-          return;
-        }
-
         const { values, missingLabels } = buildSlashSkillValues(
           invocation.kit,
           invocation.task,

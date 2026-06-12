@@ -279,9 +279,7 @@ export async function fetchArticleTextExtract(
       document.querySelector("main") ||
       document.querySelector('[role="main"]') ||
       document.body;
-    const text = cleanArticleText(
-      readable?.textContent || fallbackRoot?.textContent || "",
-    );
+    const text = cleanArticleText(readable?.textContent || fallbackRoot?.textContent || "");
     if (text.length < 300) return null;
 
     return articleTextResultToOutput(
@@ -356,10 +354,35 @@ export async function getPostNavSummary(wc: WebContents): Promise<string> {
       for (var i = 0; i < consentSelectors.length; i++) {
         try {
           var el = document.querySelector(consentSelectors[i]);
-          if (el && el.offsetHeight > 50) {
-            signals.push('consent-banner:' + consentSelectors[i]);
-            break;
-          }
+          if (!el) continue;
+          // Require the element to be (a) tall enough to be a real banner
+          // and (b) actually positioned over the page (fixed or absolute
+          // with a high z-index). Without the position check, hidden
+          // consent placeholders in the DOM (e.g. on DuckDuckGo's
+          // results page) trigger a false-positive "blocking overlay"
+          // warning that pushes the model to call clear_overlays
+          // unnecessarily. Also require a minimum z-index or visible
+          // top/left so we don't flag a tall element that's actually
+          // off-screen or below the fold.
+          if (el.offsetHeight < 50 || el.offsetWidth < 200) continue;
+          var elStyle = window.getComputedStyle(el);
+          var isPositioned =
+            elStyle.position === 'fixed' ||
+            elStyle.position === 'absolute' ||
+            elStyle.position === 'sticky';
+          if (!isPositioned) continue;
+          var zIndex = parseInt(elStyle.zIndex, 10);
+          if (!isFinite(zIndex)) zIndex = 0;
+          var rect = el.getBoundingClientRect();
+          var inViewport =
+            rect.bottom > 0 &&
+            rect.top < (window.innerHeight || 0) &&
+            rect.right > 0 &&
+            rect.left < (window.innerWidth || 0);
+          if (!inViewport) continue;
+          if (zIndex < 1 && rect.width * rect.height < 0.3 * vpArea) continue;
+          signals.push('consent-banner:' + consentSelectors[i]);
+          break;
         } catch {
           // Swallow — cross-origin frames may block selector access
         }
@@ -385,7 +408,18 @@ export async function getPostNavSummary(wc: WebContents): Promise<string> {
   );
 
   if (overlaySignal && overlaySignal !== PAGE_SCRIPT_TIMEOUT) {
-    return `${titleLine}\nWARNING: Blocking overlay detected (${overlaySignal}). Call clear_overlays or accept_cookies before reading the page.`;
+    // Soften the wording: the DOM probe is a *signal*, not a guarantee.
+    // Some pages have hidden consent placeholders or off-screen fixed
+    // elements that match the probe heuristics but do not actually
+    // block the page. The previous imperative wording ("Call
+    // clear_overlays or accept_cookies before reading the page")
+    // pushed the model to call clear_overlays on every search-result
+    // page that happened to contain a #onetrust-consent-sdk or
+    // similar selector in its DOM, even when no banner was visible.
+    // Direct the model to verify with read_page first, and only call
+    // clear_overlays if the page snapshot actually shows a blocking
+    // overlay.
+    return `${titleLine}\nHINT: A potential overlay element was detected (${overlaySignal}). Call read_page to verify whether it is actually blocking the page; if the snapshot shows a visible consent banner or dialog covering the results, then call clear_overlays or accept_cookies before continuing.`;
   }
   return titleLine;
 }

@@ -77,10 +77,17 @@ tests/*.test.ts
 !tests/page-diff-display.test.ts
 !tests/page-url.test.ts
 !tests/prompt-cache.test.ts
+!tests/provider.test.ts
 !tests/provider-openai-tools.test.ts
+!tests/provider-codex-clear-overlay.test.ts
+!tests/provider-codex-dedup.test.ts
+!tests/provider-codex-no-terminate.test.ts
+!tests/provider-codex-recovery.test.ts
+!tests/provider-codex-strike-reset.test.ts
 !tests/results-only-context.test.ts
 !tests/research-clarification-tool.test.ts
 !tests/research-quick-replies.test.ts
+!tests/safe-fs.test.ts
 !tests/scheduler.test.ts
 !tests/search-shortcuts.test.ts
 !tests/security-hardening.test.ts

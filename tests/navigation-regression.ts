@@ -6,18 +6,16 @@ import { app, BaseWindow, ipcMain } from "electron";
 
 import { buildScopedContext } from "../src/main/ai/context-builder";
 import { extractContent } from "../src/main/content/extractor";
+// eslint-disable-next-line no-restricted-syntax -- clickElementBySelector, executeAction, searchPage are defined in page-actions.ts itself; not yet extracted to sub-modules
+import { clickElementBySelector, executeAction, searchPage } from "../src/main/ai/page-actions";
+import { clearOverlays, dismissPopup } from "../src/main/ai/page-actions/overlays";
 import {
-  clickElementBySelector,
-  clearOverlays,
-  dismissPopup,
-  executeAction,
   fillFormFields,
   pressKey,
-  searchPage,
   setElementValue,
   submitFormBySelector,
-  waitForLoad,
-} from "../src/main/ai/page-actions";
+} from "../src/main/ai/page-actions/interaction";
+import { waitForLoad } from "../src/main/utils/webcontents-utils";
 import {
   capturePageSnapshot,
   schedulePageSnapshotCapture,

@@ -29,3 +29,61 @@ test("updateCheckpointNote updates the matching checkpoint by id", async () => {
   assert.equal(updated.note, "new note");
   assert.equal(runtime.getState().checkpoints[0]?.note, "new note");
 });
+
+test("auto approval mode bypasses explicitly approval-gated actions", async () => {
+  const runtime = makeRuntime();
+  runtime.setApprovalMode("auto");
+
+  const result = await runtime.runControlledAction({
+    source: "ai",
+    name: "navigate",
+    dangerous: true,
+    requiresApproval: true,
+    executor: async () => "navigated",
+  });
+
+  assert.equal(result, "navigated");
+  assert.equal(runtime.getState().supervisor.pendingApprovals.length, 0);
+  assert.equal(runtime.getState().actions[0]?.status, "completed");
+});
+
+test("confirm-dangerous still pauses explicitly approval-gated actions", async () => {
+  const runtime = makeRuntime();
+  runtime.setApprovalMode("confirm-dangerous");
+
+  const resultPromise = runtime.runControlledAction({
+    source: "ai",
+    name: "navigate",
+    dangerous: true,
+    requiresApproval: true,
+    executor: async () => "navigated",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const approval = runtime.getState().supervisor.pendingApprovals[0];
+  assert.ok(approval);
+  assert.equal(runtime.getState().actions[0]?.status, "waiting-approval");
+
+  runtime.resolveApproval(approval.id, true);
+  assert.equal(await resultPromise, "navigated");
+});
+
+test("paused supervisor still requires approval even in auto mode", async () => {
+  const runtime = makeRuntime();
+  runtime.setApprovalMode("auto");
+  runtime.pause();
+
+  const resultPromise = runtime.runControlledAction({
+    source: "ai",
+    name: "read_page",
+    executor: async () => "read",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const approval = runtime.getState().supervisor.pendingApprovals[0];
+  assert.ok(approval);
+  assert.match(approval.reason, /paused/i);
+
+  runtime.resolveApproval(approval.id, false);
+  assert.equal(await resultPromise, "Action rejected: read_page");
+});

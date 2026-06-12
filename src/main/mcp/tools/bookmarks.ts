@@ -4,9 +4,9 @@ import {
   composeDuplicateBookmarkResponse,
   composeFolderAwareResponse,
   describeFolder,
-  getBookmarkMetadataFromArgs,
   resolveBookmarkFolderTarget,
-} from "../../ai/page-actions";
+} from "../../ai/page-bookmarks";
+import { getBookmarkMetadataFromArgs } from "../../ai/page-actions/bookmark-metadata";
 import { resolveBookmarkSourceDraft } from "../../bookmarks/page-source";
 import {
   formatDeadLinkMessage,

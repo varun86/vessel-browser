@@ -55,7 +55,7 @@ function toLikelyUrl(value: string): string | null {
   const trimmed = value.trim().replace(/^["']|["']$/g, '');
   if (!trimmed) return null;
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^[a-z0-9-]+\.(com|org|net|io|dev|app|ai|co|edu|gov)(\/\S*)?$/i.test(trimmed)) {
+  if (/^(?:[a-z0-9-]+\.)+[a-z]{2,}(\/\S*)?$/i.test(trimmed)) {
     return `https://${trimmed}`;
   }
   return null;
@@ -73,12 +73,13 @@ function scalarArgsForTool(
     return url ? { url } : null;
   }
 
-  if (name === 'search') {
+  if (name === 'search' || name === 'web_search') {
     return { query: trimmed.replace(/^["']|["']$/g, '') };
   }
 
   if (
     name === 'click' ||
+    name === 'highlight' ||
     name === 'inspect_element' ||
     name === 'scroll_to_element'
   ) {
@@ -260,7 +261,7 @@ export function coerceToolArgsForExecution(
     coerced = normalizeElementTargetArgs(coerced);
   }
 
-  if (name === 'search') {
+  if (name === 'search' || name === 'web_search') {
     if (typeof coerced.query !== 'string' || !coerced.query.trim()) {
       if (typeof coerced.text === 'string' && coerced.text.trim()) {
         coerced.query = coerced.text.trim();
@@ -377,6 +378,15 @@ export function resolveToolCallName(
   }
 
   if (
+    availableToolNames.has('web_search') &&
+    (/web_?search|internet|open_?web|search_?engine|google/.test(normalized) ||
+      normalized === 'google' ||
+      normalized.startsWith('google_'))
+  ) {
+    return 'web_search';
+  }
+
+  if (
     availableToolNames.has('search') &&
     (/search|find|lookup|query/.test(normalized) ||
       normalized === 'google' ||
@@ -483,10 +493,15 @@ export function recoverNarratedActionToolCalls(
     const isSearchAction =
       /\bsearch\b/i.test(line) ||
       (/\btype\b/i.test(line) && /\bsearch box\b/i.test(line));
-    if (isSearchAction && quotedValue && availableToolNames.has('search')) {
+    if (isSearchAction && quotedValue && (availableToolNames.has('search') || availableToolNames.has('web_search'))) {
+      const recoveredSearchName =
+        !availableToolNames.has('search') ||
+        (availableToolNames.has('web_search') && /\b(web|internet|google|search engine)\b/i.test(line))
+          ? 'web_search'
+          : 'search';
       recovered.push({
         id: `recovered_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        name: 'search',
+        name: recoveredSearchName,
         argsJson: JSON.stringify({ query: quotedValue }),
       });
       continue;

@@ -51,6 +51,22 @@ const ProviderConfigSchema = z.object({
 }) satisfies z.ZodType<ProviderConfig>;
 
 let activeChatProvider: AIProvider | null = null;
+let activeManualStream:
+  | {
+      cancelled: boolean;
+      ended: boolean;
+    }
+  | null = null;
+
+function finishManualStream(
+  run: { cancelled: boolean; ended: boolean },
+  sendToRendererViews: SendToRendererViews,
+  status: "completed" | "failed",
+): void {
+  if (run.ended) return;
+  run.ended = true;
+  sendToRendererViews(Channels.AI_STREAM_END, status);
+}
 
 export function registerAIHandlers(
   tabManager: TabManager,
@@ -85,29 +101,44 @@ export function registerAIHandlers(
       return { accepted: false as const, reason: "busy" as const };
     }
 
+    const run = { cancelled: false, ended: false };
+    activeManualStream = run;
     sendToRendererViews(Channels.AI_STREAM_START, validatedQuery);
 
     (async () => {
+      let provider: AIProvider | null = null;
       try {
-        activeChatProvider = createProvider(chatConfig);
+        provider = createProvider(chatConfig);
+        activeChatProvider = provider;
         const activeTab = tabManager.getActiveTab();
         await handleAIQuery(
           validatedQuery,
-          activeChatProvider,
+          provider,
           activeTab?.view.webContents,
-          (chunk) => sendToRendererViews(Channels.AI_STREAM_CHUNK, chunk),
-          () => sendToRendererViews(Channels.AI_STREAM_END, "completed"),
+          (chunk) => {
+            if (!run.cancelled && !run.ended) {
+              sendToRendererViews(Channels.AI_STREAM_CHUNK, chunk);
+            }
+          },
+          () => {
+            if (!run.cancelled) {
+              finishManualStream(run, sendToRendererViews, "completed");
+            }
+          },
           tabManager,
           runtime,
           compactProviderHistory(validatedHistory),
           getResearchOrchestrator(),
         );
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        sendToRendererViews(Channels.AI_STREAM_CHUNK, `\n[Error: ${msg}]`);
-        sendToRendererViews(Channels.AI_STREAM_END, "failed");
+        if (!run.cancelled) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          sendToRendererViews(Channels.AI_STREAM_CHUNK, `\n[Error: ${msg}]`);
+          finishManualStream(run, sendToRendererViews, "failed");
+        }
       } finally {
-        activeChatProvider = null;
+        if (activeManualStream === run) activeManualStream = null;
+        if (activeChatProvider === provider) activeChatProvider = null;
         endAIStream("manual");
       }
     })();
@@ -117,6 +148,11 @@ export function registerAIHandlers(
 
   ipcMain.handle(Channels.AI_CANCEL, (event) => {
     assertTrustedIpcSender(event);
+    if (activeManualStream && !activeManualStream.ended) {
+      activeManualStream.cancelled = true;
+      finishManualStream(activeManualStream, sendToRendererViews, "failed");
+      endAIStream("manual");
+    }
     activeChatProvider?.cancel();
   });
 

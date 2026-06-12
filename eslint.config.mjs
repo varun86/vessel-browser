@@ -54,5 +54,30 @@ export default tseslint.config(
       "no-control-regex": "off",
     },
   },
+  {
+    files: ["src/main/network/downloads.ts"],
+    rules: {
+      "no-control-regex": "off",
+    },
+  },
+  {
+    // External code should import from `src/main/ai/page-actions/*.ts` sub-modules
+    // directly rather than reaching through the barrel. Functions that still
+    // live in page-actions.ts itself (executeAction, clickResolvedSelector,
+    // isDangerousAction, scrollPage, etc.) are the only ones the barrel is
+    // allowed to export.
+    files: ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"],
+    ignores: ["src/main/ai/page-actions.ts", "src/main/ai/page-actions/**/*"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "ImportDeclaration[source.value=/(^|\\/)page-actions$/]",
+          message:
+            "Import from a `page-actions/*.ts` sub-module directly (e.g. `../ai/page-actions/navigation`). Only `src/main/ai/page-actions.ts` and its own sub-modules may use the barrel.",
+        },
+      ],
+    },
+  },
   prettierConfig,
 );

@@ -102,6 +102,22 @@ export function getSkillSlashSuggestions(
     .map(({ kit }) => kit);
 }
 
+function canRunWithoutSlashTask(
+  kit: AutomationKit,
+  inputKey: string,
+): boolean {
+  if (inputKey !== "task") return false;
+  const taskPlaceholder = `{{${inputKey}}}`;
+  const placeholderIndex = kit.promptTemplate.indexOf(taskPlaceholder);
+  if (placeholderIndex <= 0) return false;
+  const leadingInstructions = kit.promptTemplate
+    .slice(0, placeholderIndex)
+    .replace(/\{\{\w+\}\}/g, "")
+    .replace(/\btask\s*:?\s*$/i, "")
+    .trim();
+  return /[a-z0-9]/i.test(leadingInstructions);
+}
+
 export function buildSlashSkillValues(
   kit: AutomationKit,
   task: string,
@@ -123,7 +139,10 @@ export function buildSlashSkillValues(
 
   const missingLabels = kit.inputs
     .filter((input) => input.required)
-    .filter((input) => !values[input.key]?.trim())
+    .filter((input) => {
+      if (values[input.key]?.trim()) return false;
+      return !canRunWithoutSlashTask(kit, input.key);
+    })
     .map((input) => input.label);
 
   return { values, missingLabels };
@@ -138,7 +157,11 @@ export function renderKitPrompt(
   values: Record<string, string>,
 ): string {
   for (const input of kit.inputs) {
-    if (input.required && !values[input.key]?.trim()) {
+    if (
+      input.required &&
+      !values[input.key]?.trim() &&
+      !canRunWithoutSlashTask(kit, input.key)
+    ) {
       logger.warn(
         `Required field "${input.key}" is empty for kit "${kit.id}".`,
       );
