@@ -82,6 +82,8 @@ let lastPageDiffSignature = "";
 
 const PAGE_DIFF_ACTIVITY_THROTTLE_MS = 350;
 const PAGE_DIFF_MUTATION_DEBOUNCE_MS = 1200;
+const CUSTOM_TEXT_FIELD_SELECTOR =
+  '[contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]';
 
 function normalizeSignatureText(value: string | null | undefined): string {
   return (value || "").replace(/\s+/g, " ").trim();
@@ -1206,6 +1208,55 @@ function getInputLabelWithSource(
   return {};
 }
 
+function getCustomTextFieldLabelWithSource(el: Element): {
+  label?: string;
+  source?: InteractiveElement["labelSource"];
+} {
+  const ariaLabel = getTrimmedText(el.getAttribute("aria-label"));
+  if (ariaLabel) return { label: ariaLabel, source: "aria-label" };
+
+  const labelledBy = getNodeTextByIds(el.getAttribute("aria-labelledby"));
+  if (labelledBy) return { label: labelledBy, source: "label" };
+
+  const placeholder = getTrimmedText(el.getAttribute("placeholder"));
+  if (placeholder) return { label: placeholder, source: "placeholder" };
+
+  const text = getTrimmedText(el.textContent);
+  if (text) return { label: text, source: "text" };
+
+  return {};
+}
+
+function isNativeFormField(el: Element): boolean {
+  return (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    el instanceof HTMLSelectElement
+  );
+}
+
+function shouldExposeCustomTextField(el: Element): boolean {
+  if (!(el instanceof HTMLElement) || isNativeFormField(el)) return false;
+  if (!isElementVisible(el) || isElementDisabled(el)) return false;
+
+  const role = getElementRole(el);
+  return (
+    el.isContentEditable ||
+    el.getAttribute("contenteditable") === "true" ||
+    role === "textbox" ||
+    role === "searchbox" ||
+    role === "combobox"
+  );
+}
+
+function getCustomTextFieldInputType(el: Element): string | undefined {
+  const role = getElementRole(el);
+  if (role === "searchbox") return "search";
+  if (role === "combobox") return "combobox";
+  if (role === "textbox") return "text";
+  return el.getAttribute("contenteditable") === "true" ? "text" : undefined;
+}
+
 function getButtonTextWithSource(el: Element): {
   text?: string;
   source?: InteractiveElement["labelSource"];
@@ -1504,6 +1555,21 @@ function extractInteractiveElements(): InteractiveElement[] {
     });
   });
 
+  deepQuerySelectorAll(CUSTOM_TEXT_FIELD_SELECTOR).forEach((field) => {
+    if (!shouldExposeCustomTextField(field)) return;
+    const label = getCustomTextFieldLabelWithSource(field);
+    const role = getElementRole(field);
+
+    elements.push({
+      type: "input",
+      label: label.label?.slice(0, MAX_LABEL_LENGTH),
+      labelSource: label.source,
+      inputType: getCustomTextFieldInputType(field),
+      ...buildBaseMetadata(field),
+      role,
+    });
+  });
+
   return elements;
 }
 
@@ -1542,15 +1608,21 @@ function extractForms(): Array<{
 
     form
       .querySelectorAll(
-        "input:not([type='hidden']):not([type='submit']):not([type='button']):not([type='image']), select, textarea",
+        `input:not([type='hidden']):not([type='submit']):not([type='button']):not([type='image']), select, textarea, ${CUSTOM_TEXT_FIELD_SELECTOR}`,
       )
       .forEach((input) => {
+        if (!isNativeFormField(input) && !shouldExposeCustomTextField(input)) {
+          return;
+        }
         const element = input as
           | HTMLInputElement
           | HTMLSelectElement
           | HTMLTextAreaElement;
         const tag = input.tagName.toLowerCase();
         const label = getInputLabelWithSource(element);
+        const customLabel = isNativeFormField(input)
+          ? {}
+          : getCustomTextFieldLabelWithSource(input);
         const role = getElementRole(input);
         const radioText =
           role === "radio" ||
@@ -1569,9 +1641,12 @@ function extractForms(): Array<{
               : tag === "textarea"
                 ? "textarea"
                 : "input",
-          label: label.label?.slice(0, MAX_LABEL_LENGTH),
-          labelSource: label.source,
-          inputType: element.getAttribute("type") || undefined,
+          label: (label.label || customLabel.label)?.slice(0, MAX_LABEL_LENGTH),
+          labelSource: label.source || customLabel.source,
+          inputType:
+            element.getAttribute("type") ||
+            getCustomTextFieldInputType(input) ||
+            undefined,
           placeholder: element.getAttribute("placeholder") || undefined,
           required: element.hasAttribute("required") || undefined,
           value: getElementValue(element),

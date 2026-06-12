@@ -24,6 +24,215 @@ function describeFillField(field: FillFormFieldInput): string {
   return "field";
 }
 
+const FILLABLE_CONTROL_HELPERS = `
+function vesselText(value) {
+  return value == null ? "" : String(value).trim();
+}
+
+function vesselControlLabel(el, original) {
+  var source = el || original;
+  return vesselText(source && source.getAttribute && source.getAttribute("aria-label")) ||
+    vesselText(source && source.getAttribute && source.getAttribute("placeholder")) ||
+    vesselText(source && source.getAttribute && source.getAttribute("name")) ||
+    vesselText(original && original.getAttribute && original.getAttribute("aria-label")) ||
+    vesselText(original && original.textContent).slice(0, 80) ||
+    "input";
+}
+
+function vesselIsVisible(el) {
+  if (!(el instanceof HTMLElement)) return false;
+  var style = window.getComputedStyle(el);
+  if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+  if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return false;
+  var rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function vesselIsDisabled(el) {
+  return !!(el && (el.disabled || el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true"));
+}
+
+function vesselIsNativeField(el) {
+  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
+}
+
+function vesselIsEditableElement(el) {
+  if (!(el instanceof HTMLElement)) return false;
+  var role = (el.getAttribute("role") || "").toLowerCase();
+  return el.isContentEditable ||
+    el.getAttribute("contenteditable") === "true" ||
+    role === "textbox" ||
+    role === "searchbox";
+}
+
+function vesselResolveFillableControl(el) {
+  if (!el) return null;
+  if (vesselIsNativeField(el) || vesselIsEditableElement(el)) return el;
+  if (!(el instanceof Element)) return null;
+  var nested = el.querySelector("input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [contenteditable='true'], [role='textbox'], [role='searchbox']");
+  return nested instanceof HTMLElement ? nested : null;
+}
+
+function vesselIsTextEntryActivator(el) {
+  if (!(el instanceof HTMLElement)) return false;
+  var role = (el.getAttribute("role") || "").toLowerCase();
+  return role === "combobox" ||
+    el.getAttribute("aria-haspopup") === "listbox" ||
+    !!el.getAttribute("aria-controls");
+}
+
+function vesselFindVisibleFillableControl(original) {
+  var active = vesselResolveFillableControl(document.activeElement);
+  if (active && vesselIsVisible(active) && !vesselIsDisabled(active)) return active;
+
+  var scopes = Array.from(document.querySelectorAll("dialog[open], [role='dialog'], [role='alertdialog'], [aria-modal='true'], [role='listbox'], [role='combobox'][aria-expanded='true']"));
+  scopes.push(document.body);
+  var selector = "input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [contenteditable='true'], [role='textbox'], [role='searchbox']";
+  for (var i = 0; i < scopes.length; i += 1) {
+    var scope = scopes[i];
+    if (!scope || !(scope instanceof Element)) continue;
+    var candidates = Array.from(scope.querySelectorAll(selector));
+    for (var j = 0; j < candidates.length; j += 1) {
+      var candidate = vesselResolveFillableControl(candidates[j]);
+      if (candidate && candidate !== original && vesselIsVisible(candidate) && !vesselIsDisabled(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+async function vesselFindFillTarget(original) {
+  var direct = vesselResolveFillableControl(original);
+  if (direct && !vesselIsDisabled(direct)) return { el: direct, activated: false };
+
+  if (vesselIsTextEntryActivator(original)) {
+    original.scrollIntoView({ behavior: "instant", block: "center", inline: "center" });
+    original.focus();
+    original.click();
+    await new Promise(function(resolve) { setTimeout(resolve, 180); });
+    var opened = vesselFindVisibleFillableControl(original);
+    if (opened) return { el: opened, activated: true };
+  }
+
+  return null;
+}
+
+function vesselSetNativeValue(el, value) {
+  var proto = el instanceof HTMLTextAreaElement
+    ? HTMLTextAreaElement.prototype
+    : el instanceof HTMLSelectElement
+      ? HTMLSelectElement.prototype
+      : HTMLInputElement.prototype;
+  var desc = Object.getOwnPropertyDescriptor(proto, "value");
+  if (desc && desc.set) {
+    desc.set.call(el, value);
+  } else {
+    el.value = value;
+  }
+}
+
+function vesselDispatchTextEvents(el, value) {
+  try {
+    el.dispatchEvent(new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      data: value,
+      inputType: "insertText",
+    }));
+  } catch {}
+  try {
+    el.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      cancelable: true,
+      data: value,
+      inputType: "insertText",
+    }));
+  } catch {
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+async function vesselSetFillableControlValue(original, value) {
+  var target = await vesselFindFillTarget(original);
+  if (!target || !target.el) {
+    return "Error[not-input]: Element is not text-editable. Click it first, then type into the opened text field.";
+  }
+  var el = target.el;
+  if (vesselIsDisabled(el)) return "Error[disabled]: Input is disabled";
+
+  if (el instanceof HTMLSelectElement) {
+    var requested = value.trim().toLowerCase();
+    var option = Array.from(el.options).find(function(item) {
+      return item.value.trim().toLowerCase() === requested ||
+        (item.textContent || "").trim().toLowerCase() === requested;
+    });
+    if (!option) return "Error[option-not-found]: Option not found";
+    el.value = option.value;
+    el.focus();
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    return "Selected: " + ((option.textContent || option.value).trim().slice(0, 100));
+  }
+
+  el.focus();
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    vesselSetNativeValue(el, value);
+  } else {
+    el.textContent = value;
+  }
+  vesselDispatchTextEvents(el, value);
+
+  var label = vesselControlLabel(el, original);
+  var displayValue = el instanceof HTMLInputElement && el.type === "password"
+    ? "[hidden]"
+    : value.slice(0, 80);
+  return "Typed into: " + label + " = " + displayValue + (target.activated ? " (opened field)" : "");
+}
+
+async function vesselTypeFillableControlKeystrokes(original, value) {
+  var target = await vesselFindFillTarget(original);
+  if (!target || !target.el) {
+    return "Error[not-input]: Element is not text-editable. Click it first, then type into the opened text field.";
+  }
+  var el = target.el;
+  if (vesselIsDisabled(el)) return "Error[disabled]: Input is disabled";
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || vesselIsEditableElement(el))) {
+    return "Error[not-input]: Element is not a text input";
+  }
+
+  el.focus();
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    vesselSetNativeValue(el, "");
+  } else {
+    el.textContent = "";
+  }
+  vesselDispatchTextEvents(el, "");
+
+  var chars = value.split("");
+  for (var i = 0; i < chars.length; i += 1) {
+    var ch = chars[i];
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true }));
+    el.dispatchEvent(new KeyboardEvent("keypress", { key: ch, bubbles: true, cancelable: true }));
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      vesselSetNativeValue(el, el.value + ch);
+    } else {
+      el.textContent = (el.textContent || "") + ch;
+    }
+    el.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      cancelable: true,
+      data: ch,
+      inputType: "insertText",
+    }));
+    el.dispatchEvent(new KeyboardEvent("keyup", { key: ch, bubbles: true, cancelable: true }));
+  }
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  return "Typed into: " + vesselControlLabel(el, original) + " = " + value.slice(0, 80) + (target.activated ? " (opened field)" : "");
+}
+`;
+
 async function resolveFieldSelector(
   wc: WebContents,
   field: FillFormFieldInput,
@@ -84,8 +293,22 @@ async function resolveFieldSelector(
           return normalize(parts.join(" "));
         }
 
+        function isNativeField(el) {
+          return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
+        }
+
+        function isCustomTextField(el) {
+          if (!(el instanceof HTMLElement)) return false;
+          var role = (el.getAttribute("role") || "").toLowerCase();
+          return el.isContentEditable ||
+            el.getAttribute("contenteditable") === "true" ||
+            role === "textbox" ||
+            role === "searchbox" ||
+            role === "combobox";
+        }
+
         function scoreField(el) {
-          if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) {
+          if (!isNativeField(el) && !isCustomTextField(el)) {
             return -1;
           }
           if (!isVisible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") {
@@ -114,10 +337,11 @@ async function resolveFieldSelector(
 
           if (score === 0) return -1;
           if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) score += 5;
+          if (isCustomTextField(el)) score += 3;
           return score;
         }
 
-        const candidates = Array.from(document.querySelectorAll("input, textarea, select"));
+        const candidates = Array.from(document.querySelectorAll("input, textarea, select, [contenteditable='true'], [role='textbox'], [role='searchbox'], [role='combobox']"));
         let best = null;
         let bestScore = -1;
         for (const el of candidates) {
@@ -183,31 +407,11 @@ export async function setElementValue(
     const result = await executePageScript<string>(
       wc,
       `
-      (function() {
+      (async function() {
+        ${FILLABLE_CONTROL_HELPERS}
         var el = window.__vessel?.resolveShadowSelector?.(${JSON.stringify(selector)});
         if (!el) return "Error[stale-index]: Shadow DOM element not found — call read_page to refresh.";
-        if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) return "Error[not-input]: Element is not a fillable input";
-        if (el.disabled || el.getAttribute("aria-disabled") === "true") return "Error[disabled]: Input is disabled";
-        if (el instanceof HTMLSelectElement) {
-          var requested = ${JSON.stringify(value)}.trim().toLowerCase();
-          var option = Array.from(el.options).find(function(item) {
-            return item.value.trim().toLowerCase() === requested ||
-              (item.textContent || "").trim().toLowerCase() === requested;
-          });
-          if (!option) return "Error[option-not-found]: Option not found";
-          el.value = option.value;
-          el.focus();
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          return "Selected: " + ((option.textContent || option.value).trim().slice(0, 100));
-        }
-        var proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-        var desc = Object.getOwnPropertyDescriptor(proto, "value");
-        if (desc && desc.set) { desc.set.call(el, ${JSON.stringify(value)}); } else { el.value = ${JSON.stringify(value)}; }
-        el.focus();
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-        return "Typed into: " + (el.getAttribute("aria-label") || el.placeholder || el.name || "input");
+        return vesselSetFillableControlValue(el, ${JSON.stringify(value)});
       })()
     `,
       {
@@ -221,53 +425,11 @@ export async function setElementValue(
   const result = await executePageScript<string>(
     wc,
     `
-    (function() {
+    (async function() {
+      ${FILLABLE_CONTROL_HELPERS}
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return 'Error[stale-index]: Element not found — the page may have changed. Call read_page to refresh.';
-      if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) {
-        return 'Error[not-input]: Element is not a fillable input';
-      }
-      if (el.disabled || el.getAttribute('aria-disabled') === 'true') {
-        return 'Error[disabled]: Input is disabled';
-      }
-
-      if (el instanceof HTMLSelectElement) {
-        const requested = ${JSON.stringify(value)}.trim().toLowerCase();
-        const option = Array.from(el.options).find((item) => {
-          const label = (item.textContent || '').trim().toLowerCase();
-          return label === requested || item.value.trim().toLowerCase() === requested;
-        });
-        if (!option) {
-          return 'Error[option-not-found]: Option not found';
-        }
-        el.value = option.value;
-        el.focus();
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return 'Selected: ' + ((option.textContent || option.value).trim().slice(0, 100));
-      }
-
-      const prototype = el instanceof HTMLTextAreaElement
-        ? HTMLTextAreaElement.prototype
-        : HTMLInputElement.prototype;
-      const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
-      if (descriptor && descriptor.set) {
-        descriptor.set.call(el, ${JSON.stringify(value)});
-      } else {
-        el.value = ${JSON.stringify(value)};
-      }
-
-      el.focus();
-      el.dispatchEvent(new InputEvent('input', {
-        bubbles: true,
-        cancelable: true,
-        data: ${JSON.stringify(value)},
-        inputType: 'insertText',
-      }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      return 'Typed into: ' +
-        (el.getAttribute('aria-label') || el.placeholder || el.name || 'input') +
-        ' = ' + (el.type === 'password' ? '[hidden]' : String(el.value).slice(0, 80));
+      return vesselSetFillableControlValue(el, ${JSON.stringify(value)});
     })()
   `,
     {
@@ -284,44 +446,39 @@ export async function typeKeystroke(
   selector: string,
   value: string,
 ): Promise<string> {
+  if (selector.startsWith("__vessel_idx:")) {
+    return setElementValue(wc, selector, value);
+  }
+
+  if (selector.includes(" >>> ")) {
+    const result = await executePageScript<string>(
+      wc,
+      `
+      (async function() {
+        ${FILLABLE_CONTROL_HELPERS}
+        var el = window.__vessel?.resolveShadowSelector?.(${JSON.stringify(selector)});
+        if (!el) return "Error[stale-index]: Shadow DOM element not found — call read_page to refresh.";
+        return vesselTypeFillableControlKeystrokes(el, ${JSON.stringify(value)});
+      })()
+    `,
+      {
+        timeoutMs: 2500,
+        label: "type keystrokes in shadow input",
+      },
+    );
+    return result === PAGE_SCRIPT_TIMEOUT
+      ? pageBusyError("type_text")
+      : result || "Error: Could not type into element";
+  }
+
   const result = await executePageScript<string>(
     wc,
     `
     (async function() {
+      ${FILLABLE_CONTROL_HELPERS}
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return 'Error[stale-index]: Element not found — the page may have changed. Call read_page to refresh.';
-      if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
-        return 'Error[not-input]: Element is not a text input';
-      }
-      if (el.disabled || el.getAttribute('aria-disabled') === 'true') {
-        return 'Error[disabled]: Input is disabled';
-      }
-      el.focus();
-      const prototype = el instanceof HTMLTextAreaElement
-        ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
-      if (descriptor && descriptor.set) {
-        descriptor.set.call(el, '');
-      } else {
-        el.value = '';
-      }
-      el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, data: '', inputType: 'deleteContentBackward' }));
-      const chars = ${JSON.stringify(value)}.split('');
-      for (const ch of chars) {
-        el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true, cancelable: true }));
-        el.dispatchEvent(new KeyboardEvent('keypress', { key: ch, bubbles: true, cancelable: true }));
-        if (descriptor && descriptor.set) {
-          descriptor.set.call(el, el.value + ch);
-        } else {
-          el.value += ch;
-        }
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, data: ch, inputType: 'insertText' }));
-        el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true, cancelable: true }));
-      }
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      return 'Typed into: ' +
-        (el.getAttribute('aria-label') || el.placeholder || el.name || 'input') +
-        ' = ' + (el.type === 'password' ? '[hidden]' : String(el.value).slice(0, 80));
+      return vesselTypeFillableControlKeystrokes(el, ${JSON.stringify(value)});
     })()
   `,
     {
