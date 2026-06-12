@@ -418,6 +418,77 @@ function wantsHighlightCompletion(userMessage: string): boolean {
   return /\b(highlight|mark|annotate)\b/i.test(userMessage);
 }
 
+/**
+ * True if a tool call represents *real forward progress* on the task — i.e.
+ * it changes the page state or acts on specific page content. Used to gate
+ * whether a successful tool call resets the dedup strike counters.
+ *
+ * Pure observation tools (read_page, screenshot, current_tab, list_*,
+ * metrics) are NOT included: they let a model game the strike counter by
+ * alternating `web_search → read_page → web_search` and never actually
+ * advancing. A real forward-progress action (click, navigate, type_text,
+ * save_bookmark, etc.) means the model has used the prior search result
+ * in some way, so a future duplicate search is no longer the same stuck
+ * pattern.
+ *
+ * Source of truth: src/main/ai/page-actions/orchestrator.ts switch.
+ */
+function isRealProgressTool(name: string): boolean {
+  return REAL_PROGRESS_TOOLS.has(name);
+}
+
+const REAL_PROGRESS_TOOLS = new Set<string>([
+  // Page navigation / state change
+  "navigate",
+  "go_back",
+  "go_forward",
+  "reload",
+  "create_tab",
+  "switch_tab",
+  // Page interaction
+  "click",
+  "inspect_element",
+  "type_text",
+  "select_option",
+  "submit_form",
+  "fill_form",
+  "press_key",
+  "scroll",
+  "scroll_to_element",
+  "hover",
+  "focus",
+  "paginate",
+  "login",
+  "accept_cookies",
+  "dismiss_popup",
+  "clear_overlays",
+  "set_ad_blocking",
+  "extract_table",
+  // Annotations + bookmarks
+  "highlight",
+  "clear_highlights",
+  "save_bookmark",
+  "create_bookmark_folder",
+  "organize_bookmark",
+  "archive_bookmark",
+  "open_bookmark",
+  // Wait conditions (the model is waiting for a real state change)
+  "wait_for",
+  "wait_for_navigation",
+  // Session / checkpoint actions are real user intent
+  "create_checkpoint",
+  "restore_checkpoint",
+  "save_session",
+  "load_session",
+  "delete_session",
+  "undo_last_action",
+  // Flow + suggest are explicit user-driven actions
+  "flow_start",
+  "flow_advance",
+  "flow_end",
+  "suggest",
+]);
+
 function shouldRetryCodexToolLoop(
   text: string,
   hasToolHistory: boolean,
@@ -1211,19 +1282,21 @@ export class CodexProvider implements AIProvider {
           }
           latestToolResultPreview = previewToolResult(output.output);
           const outputText = toolResultTextContent(output.output);
-          // A real-progress tool call (anything that isn't a search/clear_overlays)
-          // clears the dedup strikes for that category. The model has demonstrated
-          // it can move on, so a *future* repeated search isn't necessarily
-          // the same stuck pattern.
+          // A real-progress tool call clears the dedup strikes for that
+          // category — but ONLY for tools that actually change or act on
+          // the page. Pure observation tools (read_page, screenshot,
+          // current_tab) do not reset, because the model can otherwise
+          // game the strike counter by alternating
+          //   web_search → (suppressed) → read_page → web_search
+          // and never actually advance. A real forward-progress action
+          // (click, navigate, inspect_element, highlight, save_bookmark,
+          // etc.) means the model has used the prior search result in
+          // some way, so a future duplicate search is no longer the same
+          // stuck pattern.
           if (!looksLikeFailedToolOutput(outputText)) {
-            if (
-              prepared.prepared.name !== "web_search" &&
-              prepared.prepared.name !== "search"
-            ) {
+            if (isRealProgressTool(prepared.prepared.name)) {
               searchDedupStrikes = 0;
               lastSearchStrike = null;
-            }
-            if (prepared.prepared.name !== "clear_overlays") {
               clearOverlayDedupStrikes = 0;
             }
           }
