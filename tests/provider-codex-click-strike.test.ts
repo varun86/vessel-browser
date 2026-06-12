@@ -251,3 +251,77 @@ test(
     assert.equal(requestBodies.length, 4);
   },
 );
+
+test(
+  "Codex harness resets failed-click strikes after real progress",
+  { timeout: 10_000 },
+  async () => {
+    // A click target can become meaningful again after the page advances.
+    // The first #45 failure should not poison a later #45 attempt once a
+    // different click has made real progress in between.
+    const provider = new CodexProvider(codexTokens(), "gpt-5");
+    const chunks: string[] = [];
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const requestBodies: Array<Record<string, unknown>> = [];
+
+    await withMockFetch(async (_input, init) => {
+      requestBodies.push(
+        JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      );
+      const requestCount = requestBodies.length;
+
+      if (requestCount === 1) {
+        return codexSseResponse([clickCall("call_click_1", 45)]);
+      }
+      if (requestCount === 2) {
+        return codexSseResponse([clickCall("call_click_2", 46)]);
+      }
+      if (requestCount === 3) {
+        return codexSseResponse([clickCall("call_click_3", 45)]);
+      }
+      return codexSseResponse([
+        {
+          type: "response.output_text.delta",
+          delta: "I advanced with another result and continued normally.",
+        },
+      ]);
+    }, () =>
+      provider.streamAgentQuery(
+        "system prompt",
+        "click the cheapest flight result",
+        [...ALL_TOOLS],
+        (chunk) => chunks.push(chunk),
+        async (name, args) => {
+          calls.push({ name, args });
+          if (args.index === 46) {
+            return "Clicked: result link\nNavigated to https://example.test/result";
+          }
+          return "Clicked: result link\nNote: Page did not change after click.";
+        },
+        () => undefined,
+      ),
+    );
+
+    const clickCalls = calls.filter((c) => c.name === "click");
+    assert.equal(
+      clickCalls.length,
+      3,
+      "the later #45 attempt should execute as a fresh first strike after real progress",
+    );
+
+    const terminationChunks = chunks.filter((chunk) =>
+      chunk.includes("<<task_complete: stopped after repeated failed click"),
+    );
+    assert.equal(
+      terminationChunks.length,
+      0,
+      "real progress should clear earlier failed-click strikes",
+    );
+
+    assert.equal(
+      requestBodies.length,
+      4,
+      "harness should continue after the later #45 failure instead of terminating",
+    );
+  },
+);

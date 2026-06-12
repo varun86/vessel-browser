@@ -1026,8 +1026,7 @@ export class CodexProvider implements AIProvider {
     // gets terminated if it retries the exact same target. The dedup
     // signature is the same one used for the generic recent-signature
     // dedup check below (stableToolSignature), so a stable JSON of the
-    // call's name + args. Reset on real progress (navigate, read_page of
-    // a different state, etc.).
+    // call's name + args. Reset on real progress (navigate, click, etc.).
     const failedClickStrikesBySignature = new Map<string, number>();
     let terminatedByDedup: {
       kind: "search" | "clear-overlay" | "failed-click";
@@ -1348,6 +1347,7 @@ export class CodexProvider implements AIProvider {
               lastSearchStrike = null;
               clearOverlayDedupStrikes = 0;
               lastSuccessfulWebSearchQuery = null;
+              failedClickStrikesBySignature.clear();
             }
           }
           if (
