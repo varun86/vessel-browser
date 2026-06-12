@@ -60,9 +60,18 @@ function isTextEntryControl(element: InteractiveElement): boolean {
 
 function formatFieldAffordance(element: InteractiveElement): string {
   if (element.index == null || element.disabled) return "";
+  const hasValue =
+    element.hasValue === true ||
+    (typeof element.value === "string" && element.value.trim());
   const empty =
-    typeof element.value === "string" && element.value.trim() ? "" : "; empty";
+    hasValue ? "" : "; empty";
   if (isTextEntryControl(element)) {
+    if (element.focused) {
+      return `${empty}; focused; type_text(text="...") targets this`;
+    }
+    if (hasValue) {
+      return `; has value; type_text(index=${element.index}) changes it`;
+    }
     return `${empty}; use type_text(index=${element.index})`;
   }
   if (element.type === "select") {

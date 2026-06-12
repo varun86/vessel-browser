@@ -346,6 +346,7 @@ test("visible_only marks travel-style fields as empty and directly fillable", ()
         label: "Where from?",
         inputType: "combobox",
         role: "combobox",
+        hasValue: true,
         ariaExpanded: false,
         index: 12,
         visible: true,
@@ -357,6 +358,7 @@ test("visible_only marks travel-style fields as empty and directly fillable", ()
         label: "Where to?",
         inputType: "combobox",
         role: "combobox",
+        focused: true,
         ariaExpanded: false,
         index: 13,
         visible: true,
@@ -382,6 +384,7 @@ test("visible_only marks travel-style fields as empty and directly fillable", ()
             label: "Where from?",
             inputType: "combobox",
             role: "combobox",
+            hasValue: true,
             index: 12,
             visible: true,
             inViewport: true,
@@ -396,11 +399,11 @@ test("visible_only marks travel-style fields as empty and directly fillable", ()
 
   assert.match(
     context,
-    /\[#12\] \[Where from\?\] combobox input fillable empty use type_text\(index=12\)/,
+    /\[#12\] \[Where from\?\] combobox input fillable already has value; use type_text\(index=12\) only to change it \(role=combobox, has-value, expanded=false\)/,
   );
   assert.match(
     context,
-    /\[#13\] \[Where to\?\] combobox input fillable empty use type_text\(index=13\)/,
+    /\[#13\] \[Where to\?\] combobox input fillable empty cursor is here; type_text\(text="\.\.\."\) or type_text\(index=13\) \(role=combobox, focused, expanded=false\)/,
   );
   assert.match(
     context,
@@ -421,7 +424,19 @@ test("compact context keeps fill hints for visible fields", () => {
           label: "Where from?",
           inputType: "combobox",
           role: "combobox",
+          hasValue: true,
           index: 12,
+          visible: true,
+          inViewport: true,
+          fullyInViewport: true,
+        },
+        {
+          type: "input",
+          label: "Where to?",
+          inputType: "combobox",
+          role: "combobox",
+          focused: true,
+          index: 13,
           visible: true,
           inViewport: true,
           fullyInViewport: true,
@@ -433,7 +448,11 @@ test("compact context keeps fill hints for visible fields", () => {
 
   assert.match(
     context,
-    /\[#12\] Where from\? \(combobox input; empty; use type_text\(index=12\)\)/,
+    /\[#12\] Where from\? \(combobox input; has value; type_text\(index=12\) changes it\)/,
+  );
+  assert.match(
+    context,
+    /\[#13\] Where to\? \(combobox input; empty; focused; type_text\(text="\.\.\."\) targets this\)/,
   );
 });
 

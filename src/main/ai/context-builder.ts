@@ -64,6 +64,12 @@ function formatElementMeta(el: InteractiveElement): string[] {
   if (el.checked !== undefined) {
     meta.push(el.checked ? "checked" : "unchecked");
   }
+  if (el.focused) {
+    meta.push("focused");
+  }
+  if (el.hasValue && !shouldRenderFieldValue(el)) {
+    meta.push("has-value");
+  }
   if (el.ariaExpanded !== undefined) {
     meta.push(`expanded=${el.ariaExpanded}`);
   }
@@ -154,11 +160,20 @@ function hasRenderedValue(el: InteractiveElement): boolean {
 }
 
 function hasAnyFieldValue(el: InteractiveElement): boolean {
-  return typeof el.value === "string" && el.value.trim().length > 0;
+  return (
+    el.hasValue === true ||
+    (typeof el.value === "string" && el.value.trim().length > 0)
+  );
 }
 
 function formatFillHint(el: InteractiveElement): string | null {
   if (el.index == null || el.disabled) return null;
+  if (el.focused && isTextEntryControl(el)) {
+    return `cursor is here; type_text(text="...") or type_text(index=${el.index})`;
+  }
+  if (hasAnyFieldValue(el) && isTextEntryControl(el)) {
+    return `already has value; use type_text(index=${el.index}) only to change it`;
+  }
   if (isTextEntryControl(el)) return `use type_text(index=${el.index})`;
   if (el.type === "select") return `use select_option(index=${el.index})`;
   return null;

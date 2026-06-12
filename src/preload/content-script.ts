@@ -1257,6 +1257,14 @@ function getCustomTextFieldInputType(el: Element): string | undefined {
   return el.getAttribute("contenteditable") === "true" ? "text" : undefined;
 }
 
+function getCustomTextFieldHasValue(el: Element): boolean | undefined {
+  const value =
+    getTrimmedText(el.textContent) ||
+    getTrimmedText(el.getAttribute("aria-valuetext")) ||
+    getTrimmedText(el.getAttribute("value"));
+  return value ? true : undefined;
+}
+
 function getButtonTextWithSource(el: Element): {
   text?: string;
   source?: InteractiveElement["labelSource"];
@@ -1351,6 +1359,25 @@ function getElementValue(
   return undefined;
 }
 
+function getElementHasValue(
+  el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+): boolean | undefined {
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    if (
+      el.type === "password" ||
+      el.type === "checkbox" ||
+      el.type === "radio"
+    ) {
+      return undefined;
+    }
+    return getTrimmedText(el.value) ? true : undefined;
+  }
+  if (el instanceof HTMLSelectElement) {
+    return getTrimmedText(el.value) ? true : undefined;
+  }
+  return undefined;
+}
+
 function getSelectOptions(el: HTMLSelectElement): SelectOption[] | undefined {
   const options = Array.from(el.options)
     .map((option) => ({
@@ -1369,6 +1396,14 @@ function getAriaBoolean(el: Element, attr: string): boolean | undefined {
   return undefined;
 }
 
+function getDeepActiveElement(): Element | null {
+  let active: Element | null = document.activeElement;
+  while (active instanceof HTMLElement && active.shadowRoot?.activeElement) {
+    active = active.shadowRoot.activeElement;
+  }
+  return active;
+}
+
 function buildBaseMetadata(
   el: Element,
 ): Pick<
@@ -1385,6 +1420,7 @@ function buildBaseMetadata(
   | "obscured"
   | "blockedByOverlay"
   | "disabled"
+  | "focused"
   | "ariaExpanded"
   | "ariaPressed"
   | "ariaSelected"
@@ -1398,6 +1434,7 @@ function buildBaseMetadata(
     description: getElementDescription(el),
     ...getVisibilityState(el),
     disabled: isElementDisabled(el),
+    focused: getDeepActiveElement() === el || undefined,
     ariaExpanded: getAriaBoolean(el, "aria-expanded"),
     ariaPressed: getAriaBoolean(el, "aria-pressed"),
     ariaSelected: getAriaBoolean(el, "aria-selected"),
@@ -1540,6 +1577,7 @@ function extractInteractiveElements(): InteractiveElement[] {
       placeholder: element.getAttribute("placeholder") || undefined,
       required: element.hasAttribute("required") || undefined,
       value: getElementValue(element),
+      hasValue: getElementHasValue(element),
       options:
         element instanceof HTMLSelectElement
           ? getSelectOptions(element)
@@ -1565,6 +1603,7 @@ function extractInteractiveElements(): InteractiveElement[] {
       label: label.label?.slice(0, MAX_LABEL_LENGTH),
       labelSource: label.source,
       inputType: getCustomTextFieldInputType(field),
+      hasValue: getCustomTextFieldHasValue(field),
       ...buildBaseMetadata(field),
       role,
     });
@@ -1650,6 +1689,9 @@ function extractForms(): Array<{
           placeholder: element.getAttribute("placeholder") || undefined,
           required: element.hasAttribute("required") || undefined,
           value: getElementValue(element),
+          hasValue: isNativeFormField(input)
+            ? getElementHasValue(element)
+            : getCustomTextFieldHasValue(input),
           options:
             element instanceof HTMLSelectElement
               ? getSelectOptions(element)
