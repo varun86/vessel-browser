@@ -41,6 +41,36 @@ function elementLabel(element: InteractiveElement): string {
   );
 }
 
+function isTextEntryControl(element: InteractiveElement): boolean {
+  if (element.disabled) return false;
+  if (element.type !== "input" && element.type !== "textarea") return false;
+
+  const inputType = (element.inputType || "text").toLowerCase();
+  return ![
+    "button",
+    "checkbox",
+    "file",
+    "hidden",
+    "image",
+    "radio",
+    "reset",
+    "submit",
+  ].includes(inputType);
+}
+
+function formatFieldAffordance(element: InteractiveElement): string {
+  if (element.index == null || element.disabled) return "";
+  const empty =
+    typeof element.value === "string" && element.value.trim() ? "" : "; empty";
+  if (isTextEntryControl(element)) {
+    return `${empty}; use type_text(index=${element.index})`;
+  }
+  if (element.type === "select") {
+    return `; use select_option(index=${element.index})`;
+  }
+  return "";
+}
+
 function formatElement(element: InteractiveElement): string {
   const prefix = element.index != null ? `[#${element.index}] ` : "";
   const kind =
@@ -50,7 +80,8 @@ function formatElement(element: InteractiveElement): string {
         ? "select"
         : element.type;
   const href = element.type === "link" && element.href ? ` -> ${element.href}` : "";
-  return `${prefix}${elementLabel(element)} (${kind})${href}`;
+  const affordance = formatFieldAffordance(element);
+  return `${prefix}${elementLabel(element)} (${kind}${affordance})${href}`;
 }
 
 function uniqueElements(elements: InteractiveElement[]): InteractiveElement[] {

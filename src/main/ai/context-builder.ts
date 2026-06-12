@@ -132,6 +132,50 @@ function summarizeElementValue(
   return null;
 }
 
+function isTextEntryControl(el: InteractiveElement): boolean {
+  if (el.disabled) return false;
+  if (el.type !== "input" && el.type !== "textarea") return false;
+
+  const inputType = (el.inputType || "text").toLowerCase();
+  return ![
+    "button",
+    "checkbox",
+    "file",
+    "hidden",
+    "image",
+    "radio",
+    "reset",
+    "submit",
+  ].includes(inputType);
+}
+
+function hasRenderedValue(el: InteractiveElement): boolean {
+  return Boolean(summarizeElementValue(el));
+}
+
+function hasAnyFieldValue(el: InteractiveElement): boolean {
+  return typeof el.value === "string" && el.value.trim().length > 0;
+}
+
+function formatFillHint(el: InteractiveElement): string | null {
+  if (el.index == null || el.disabled) return null;
+  if (isTextEntryControl(el)) return `use type_text(index=${el.index})`;
+  if (el.type === "select") return `use select_option(index=${el.index})`;
+  return null;
+}
+
+function appendFieldAffordances(parts: string[], el: InteractiveElement): void {
+  if (isTextEntryControl(el)) {
+    parts.push("fillable");
+    if (!hasAnyFieldValue(el)) parts.push("empty");
+  } else if (el.type === "select") {
+    if (!hasRenderedValue(el) && !hasAnyFieldValue(el)) parts.push("not-selected");
+  }
+
+  const hint = formatFillHint(el);
+  if (hint) parts.push(hint);
+}
+
 function isQuantityLike(el: InteractiveElement): boolean {
   const text = [
     el.label,
@@ -536,12 +580,14 @@ function formatInteractiveElements(elements: InteractiveElement[]): string {
         parts.push("input");
         const summary = summarizeElementValue(el);
         if (summary) parts.push(`${summary.label}="${summary.value}"`);
+        if (!isQuantityLike(el)) appendFieldAffordances(parts, el);
         if (el.required) parts.push("(required)");
       } else if (el.type === "select") {
         parts.push(`[${el.label || "Select"}]`);
         parts.push("dropdown");
         const summary = summarizeElementValue(el);
         if (summary) parts.push(`${summary.label}="${summary.value}"`);
+        appendFieldAffordances(parts, el);
         if (el.options?.length) {
           parts.push(
             `options=${el.options
@@ -555,6 +601,7 @@ function formatInteractiveElements(elements: InteractiveElement[]): string {
         parts.push("textarea");
         const summary = summarizeElementValue(el);
         if (summary) parts.push(`${summary.label}="${summary.value}"`);
+        appendFieldAffordances(parts, el);
       }
 
       const meta = formatElementMeta(el);
@@ -627,12 +674,14 @@ function formatForms(forms: PageContent["forms"]): string {
             fieldParts.push(field.inputType || "text");
             const summary = summarizeElementValue(field);
             if (summary) fieldParts.push(`${summary.label}="${summary.value}"`);
+            if (!isQuantityLike(field)) appendFieldAffordances(fieldParts, field);
             if (field.required) fieldParts.push("(required)");
           } else if (field.type === "select") {
             fieldParts.push(`[${field.label || "Select"}]`);
             fieldParts.push("dropdown");
             const summary = summarizeElementValue(field);
             if (summary) fieldParts.push(`${summary.label}="${summary.value}"`);
+            appendFieldAffordances(fieldParts, field);
             if (field.options?.length) {
               fieldParts.push(
                 `options=${field.options
@@ -646,6 +695,7 @@ function formatForms(forms: PageContent["forms"]): string {
             fieldParts.push("textarea");
             const summary = summarizeElementValue(field);
             if (summary) fieldParts.push(`${summary.label}="${summary.value}"`);
+            appendFieldAffordances(fieldParts, field);
           }
 
           const meta = formatElementMeta(field);
