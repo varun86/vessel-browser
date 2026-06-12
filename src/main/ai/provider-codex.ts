@@ -322,6 +322,89 @@ function buildCodexLatestStateReminder(toolResultPreview: string | null): string
   return "";
 }
 
+/**
+ * Build a strict, actionable error for a repeated search (same query on
+ * `web_search` or `search` already succeeded, or a different-query `web_search`
+ * is a drift from an earlier successful web search). The message names the
+ * previous tool + query verbatim and points the model at the current page so
+ * a less stubborn model can recover without the harness having to terminate.
+ */
+function buildCodexRepeatedSearchError(
+  previousTool: string,
+  previousQuery: string,
+  latestToolResultPreview: string | null,
+  mode: "repeated" | "drifted",
+): string {
+  const stateReminder = buildCodexLatestStateReminder(latestToolResultPreview);
+  const header =
+    mode === "drifted"
+      ? `Error: You already performed ${previousTool} successfully for this task.`
+      : `Error: You already searched for "${previousQuery}" successfully with ${previousTool}.`;
+  const lines = [
+    header,
+    mode === "drifted"
+      ? `Do not rewrite or broaden the query with another ${previousTool}. The latest results are already on the page.`
+      : `Do not search the same query again with ${previousTool} (or its alias search/web_search). The latest results are already on the page.`,
+    `Continue from the current results with read_page, inspect_element, click, or provide the final answer. Do not call any search tool again.`,
+  ];
+  if (stateReminder) {
+    lines.push(stateReminder);
+  }
+  return lines.join(" ");
+}
+
+/**
+ * Build a strict, actionable error for a fabricated clear_overlays call
+ * (no blocking overlay signal in the system prompt or latest tool result).
+ */
+function buildCodexUnsupportedClearOverlayError(
+  latestToolResultPreview: string | null,
+): string {
+  const stateReminder = buildCodexLatestStateReminder(latestToolResultPreview);
+  const lines = [
+    `Error: No blocking overlay signal is present in the latest browser state.`,
+    `Do not call clear_overlays unless read_page or the page context explicitly reports a blocking overlay.`,
+    `Continue with read_page, inspect_element, click, or provide the final answer. Do not call clear_overlays again.`,
+  ];
+  if (stateReminder) {
+    lines.push(stateReminder);
+  }
+  return lines.join(" ");
+}
+
+function buildCodexDedupTerminationChunk(
+  kind: "search" | "clear-overlay",
+  previousQuery: string | null,
+  pageUrl: string | null,
+): string {
+  const detail =
+    kind === "search" && previousQuery
+      ? `duplicate search ("${previousQuery}")`
+      : kind === "search"
+        ? "duplicate search"
+        : "fabricated clear_overlays (no overlay signal)";
+  const pageHint = pageUrl ? ` on ${pageUrl}` : "";
+  return `\n<<task_complete: stopped after ${detail}${pageHint} — see latest page results>>\n`;
+}
+
+/**
+ * Extract a page URL from a tool result preview string. Mirrors the regex in
+ * buildCodexLatestStateReminder but returns just the captured URL (or null
+ * if none was found) so the dedup termination message can include a stable
+ * page-state anchor without depending on a state-line being present.
+ */
+function extractCodexPageUrlFromPreview(text: string | null): string | null {
+  if (!text) return null;
+  const stateMatch = text.match(
+    /\[state:\s+url=([^,\]\n]+),\s+title=/i,
+  );
+  if (stateMatch?.[1]) return stateMatch[1].trim();
+  const navigated =
+    text.match(/\b(?:navigated to|went back to|went forward to)\s+([^\s\n]+)/i)?.[1] ??
+    text.match(/\b(?:web\s+)?searched "[^"]+"[^\n]*?(?:->|→)\s+([^\s\n]+)/i)?.[1];
+  return navigated?.trim() || null;
+}
+
 function wantsHighlightCompletion(userMessage: string): boolean {
   return /\b(highlight|mark|annotate)\b/i.test(userMessage);
 }
@@ -826,10 +909,24 @@ export class CodexProvider implements AIProvider {
     let latestToolResultPreview: string | null = null;
     let accumulatedReadPageResults = "";
     const recentSuccessfulSearchQueries: string[] = [];
+    const recentSuccessfulSearchToolByQuery = new Map<string, string>();
     let successfulWebSearchCount = 0;
     const requiresHighlight = wantsHighlightCompletion(userMessage);
     let hasHighlighted = false;
     let completedByFallback = false;
+    // Dedup-strike counters. Increment when the harness suppresses a
+    // search/clear_overlays call as a duplicate; reset on real progress.
+    // When a counter hits MAX_DEDUP_STRIKES we terminate the loop so a
+    // stubborn model can't burn the whole iteration budget retrying.
+    let searchDedupStrikes = 0;
+    let clearOverlayDedupStrikes = 0;
+    let lastSearchStrike: { tool: string; query: string } | null = null;
+    let terminatedByDedup: {
+      kind: "search" | "clear-overlay";
+      previousQuery: string | null;
+      pageUrl: string | null;
+    } | null = null;
+    const MAX_DEDUP_STRIKES = 2;
 
     try {
       for (let i = 0; i < maxIterations; i++) {
@@ -998,6 +1095,75 @@ export class CodexProvider implements AIProvider {
             continue;
           }
           if (
+            isRepeatedSearchAcrossTools ||
+            isQueryDriftedWebSearch
+          ) {
+            onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
+            const previousTool = isRepeatedSearchAcrossTools
+              ? (recentSuccessfulSearchToolByQuery.get(searchToolQuery ?? "") ??
+                (prepared.prepared.name === "web_search" ? "search" : "web_search"))
+              : "web_search";
+            const previousQuery =
+              isRepeatedSearchAcrossTools
+                ? (searchToolQuery ?? "")
+                : (successfulWebSearchCount > 0
+                  ? "(earlier web_search)"
+                  : "");
+            const mode: "repeated" | "drifted" = isRepeatedSearchAcrossTools
+              ? "repeated"
+              : "drifted";
+            const output = createCodexToolOutput(
+              prepared.prepared.callId,
+              buildCodexRepeatedSearchError(
+                previousTool,
+                previousQuery,
+                latestToolResultPreview,
+                mode,
+              ),
+            );
+            currentInput.push(output);
+            latestToolResultPreview = previewToolResult(output.output);
+            correctionCount += 1;
+            searchDedupStrikes += 1;
+            lastSearchStrike = {
+              tool: isRepeatedSearchAcrossTools
+                ? prepared.prepared.name
+                : "web_search",
+              query: isRepeatedSearchAcrossTools
+                ? previousQuery
+                : "(drifted)",
+            };
+            if (searchDedupStrikes >= MAX_DEDUP_STRIKES) {
+              terminatedByDedup = {
+                kind: "search",
+                previousQuery: lastSearchStrike.query || null,
+                pageUrl: extractCodexPageUrlFromPreview(latestToolResultPreview),
+              };
+              break;
+            }
+            continue;
+          }
+          if (isUnsupportedClearOverlay) {
+            onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
+            const output = createCodexToolOutput(
+              prepared.prepared.callId,
+              buildCodexUnsupportedClearOverlayError(latestToolResultPreview),
+            );
+            currentInput.push(output);
+            latestToolResultPreview = previewToolResult(output.output);
+            correctionCount += 1;
+            clearOverlayDedupStrikes += 1;
+            if (clearOverlayDedupStrikes >= MAX_DEDUP_STRIKES) {
+              terminatedByDedup = {
+                kind: "clear-overlay",
+                previousQuery: null,
+                pageUrl: extractCodexPageUrlFromPreview(latestToolResultPreview),
+              };
+              break;
+            }
+            continue;
+          }
+          if (
             ![
               "read_page",
               "current_tab",
@@ -1013,39 +1179,6 @@ export class CodexProvider implements AIProvider {
             const output = createCodexToolOutput(
               prepared.prepared.callId,
               `Error: Repeated the same tool call (${prepared.prepared.name}) with the same arguments twice in a row. Do not repeat it. Continue with the next logical step for the original task.`,
-            );
-            currentInput.push(output);
-            latestToolResultPreview = previewToolResult(output.output);
-            correctionCount += 1;
-            continue;
-          }
-          if (isRepeatedSearchAcrossTools) {
-            onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
-            const output = createCodexToolOutput(
-              prepared.prepared.callId,
-              `Error: You already searched for "${searchToolQuery}" successfully. Do not search the same query again with ${prepared.prepared.name}. Continue from the current results with read_page, inspect_element, click, or the final answer.`,
-            );
-            currentInput.push(output);
-            latestToolResultPreview = previewToolResult(output.output);
-            correctionCount += 1;
-            continue;
-          }
-          if (isQueryDriftedWebSearch) {
-            onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
-            const output = createCodexToolOutput(
-              prepared.prepared.callId,
-              `Error: You already performed web_search successfully for this task. Do not rewrite or broaden the query with another web_search. Continue from the current results with read_page, inspect_element, click, or the final answer.`,
-            );
-            currentInput.push(output);
-            latestToolResultPreview = previewToolResult(output.output);
-            correctionCount += 1;
-            continue;
-          }
-          if (isUnsupportedClearOverlay) {
-            onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
-            const output = createCodexToolOutput(
-              prepared.prepared.callId,
-              `Error: No blocking overlay signal is present in the latest browser state. Do not call clear_overlays unless read_page or the page context explicitly reports a blocking overlay. Continue with read_page, inspect_element, click, or the final answer.`,
             );
             currentInput.push(output);
             latestToolResultPreview = previewToolResult(output.output);
@@ -1069,14 +1202,37 @@ export class CodexProvider implements AIProvider {
           }
           latestToolResultPreview = previewToolResult(output.output);
           const outputText = toolResultTextContent(output.output);
+          // A real-progress tool call (anything that isn't a search/clear_overlays)
+          // clears the dedup strikes for that category. The model has demonstrated
+          // it can move on, so a *future* repeated search isn't necessarily
+          // the same stuck pattern.
+          if (!looksLikeFailedToolOutput(outputText)) {
+            if (
+              prepared.prepared.name !== "web_search" &&
+              prepared.prepared.name !== "search"
+            ) {
+              searchDedupStrikes = 0;
+              lastSearchStrike = null;
+            }
+            if (prepared.prepared.name !== "clear_overlays") {
+              clearOverlayDedupStrikes = 0;
+            }
+          }
           if (
             searchToolQuery &&
             !looksLikeFailedToolOutput(outputText) &&
             !recentSuccessfulSearchQueries.includes(searchToolQuery)
           ) {
             recentSuccessfulSearchQueries.push(searchToolQuery);
+            recentSuccessfulSearchToolByQuery.set(
+              searchToolQuery,
+              prepared.prepared.name,
+            );
             if (recentSuccessfulSearchQueries.length > 4) {
-              recentSuccessfulSearchQueries.shift();
+              const dropped = recentSuccessfulSearchQueries.shift();
+              if (dropped) {
+                recentSuccessfulSearchToolByQuery.delete(dropped);
+              }
             }
           }
           if (
@@ -1134,6 +1290,16 @@ export class CodexProvider implements AIProvider {
             });
           }
           correctionCount = 0;
+        }
+        if (terminatedByDedup) {
+          onChunk(
+            buildCodexDedupTerminationChunk(
+              terminatedByDedup.kind,
+              terminatedByDedup.previousQuery,
+              terminatedByDedup.pageUrl,
+            ),
+          );
+          break;
         }
         if (completedByFallback) break;
         if (correctionCount >= 2) {
