@@ -383,48 +383,6 @@ function buildCodexUnsupportedClearOverlayError(
   return lines.join(" ");
 }
 
-function buildCodexDedupTerminationChunk(
-  kind: "search" | "clear-overlay" | "failed-click",
-  previousQuery: string | null,
-  pageUrl: string | null,
-  targetSummary?: string,
-): string {
-  const detail =
-    kind === "search" && previousQuery
-      ? `duplicate search ("${previousQuery}")`
-      : kind === "search"
-        ? "duplicate search"
-        : kind === "clear-overlay"
-          ? "fabricated clear_overlays (no overlay signal)"
-          : targetSummary
-            ? `repeated failed click (${targetSummary})`
-            : "repeated failed click";
-  const pageHint = pageUrl ? ` on ${pageUrl}` : "";
-  return `\n<<task_complete: stopped after ${detail}${pageHint} — see latest page results>>\n`;
-}
-
-/**
- * Extract a page URL from a tool result preview string. Mirrors the regex in
- * buildCodexLatestStateReminder but returns just the captured URL (or null
- * if none was found) so the dedup termination message can include a stable
- * page-state anchor without depending on a state-line being present.
- */
-function extractCodexPageUrlFromPreview(text: string | null): string | null {
-  if (!text) return null;
-  const stateMatch = text.match(
-    /\[state:\s+url=([^,\]\n]+),\s+title=/i,
-  );
-  if (stateMatch?.[1]) return stateMatch[1].trim();
-  const latestStateMatch = text.match(
-    /\bLatest browser state:\s*URL\s+(.+?)(?:, title|\.\s|$)/i,
-  );
-  if (latestStateMatch?.[1]) return latestStateMatch[1].trim();
-  const navigated =
-    text.match(/\b(?:navigated to|went back to|went forward to)\s+([^\s\n]+)/i)?.[1] ??
-    text.match(/\b(?:web\s+)?searched "[^"]+"[^\n]*?(?:->|→)\s+([^\s\n]+)/i)?.[1];
-  return navigated?.trim() || null;
-}
-
 function wantsHighlightCompletion(userMessage: string): boolean {
   return /\b(highlight|mark|annotate)\b/i.test(userMessage);
 }
@@ -1014,27 +972,6 @@ export class CodexProvider implements AIProvider {
     const requiresHighlight = wantsHighlightCompletion(userMessage);
     let hasHighlighted = false;
     let completedByFallback = false;
-    // Dedup-strike counters. Increment when the harness suppresses a
-    // search/clear_overlays call as a duplicate; reset on real progress.
-    // When a counter hits MAX_DEDUP_STRIKES we terminate the loop so a
-    // stubborn model can't burn the whole iteration budget retrying.
-    let searchDedupStrikes = 0;
-    let clearOverlayDedupStrikes = 0;
-    let lastSearchStrike: { tool: string; query: string } | null = null;
-    // Click-failure strikes are tracked PER SIGNATURE so that the model
-    // is allowed to try a different result link (different index/text) but
-    // gets terminated if it retries the exact same target. The dedup
-    // signature is the same one used for the generic recent-signature
-    // dedup check below (stableToolSignature), so a stable JSON of the
-    // call's name + args. Reset on real progress (navigate, click, etc.).
-    const failedClickStrikesBySignature = new Map<string, number>();
-    let terminatedByDedup: {
-      kind: "search" | "clear-overlay" | "failed-click";
-      previousQuery: string | null;
-      pageUrl: string | null;
-      targetSummary?: string;
-    } | null = null;
-    const MAX_DEDUP_STRIKES = 2;
 
     try {
       for (let i = 0; i < maxIterations; i++) {
@@ -1247,25 +1184,6 @@ export class CodexProvider implements AIProvider {
             currentInput.push(output);
             latestToolResultPreview = previewToolResult(output.output);
             correctionCount += 1;
-            searchDedupStrikes += 1;
-            // Record the prior query (not a literal "(drifted)") so the
-            // termination chunk can name the search the model is stuck on
-            // and the user (or a future log review) has something
-            // concrete to look at.
-            lastSearchStrike = {
-              tool: isRepeatedSearchAcrossTools
-                ? prepared.prepared.name
-                : "web_search",
-              query: previousQuery,
-            };
-            if (searchDedupStrikes >= MAX_DEDUP_STRIKES) {
-              terminatedByDedup = {
-                kind: "search",
-                previousQuery: lastSearchStrike.query || null,
-                pageUrl: extractCodexPageUrlFromPreview(latestToolResultPreview),
-              };
-              break;
-            }
             continue;
           }
           if (isUnsupportedClearOverlay) {
@@ -1277,15 +1195,6 @@ export class CodexProvider implements AIProvider {
             currentInput.push(output);
             latestToolResultPreview = previewToolResult(output.output);
             correctionCount += 1;
-            clearOverlayDedupStrikes += 1;
-            if (clearOverlayDedupStrikes >= MAX_DEDUP_STRIKES) {
-              terminatedByDedup = {
-                kind: "clear-overlay",
-                previousQuery: null,
-                pageUrl: extractCodexPageUrlFromPreview(latestToolResultPreview),
-              };
-              break;
-            }
             continue;
           }
           if (
@@ -1343,11 +1252,12 @@ export class CodexProvider implements AIProvider {
           // is NOT treated as drift.
           if (!looksLikeFailedToolOutput(outputText)) {
             if (isRealProgressTool(prepared.prepared.name)) {
-              searchDedupStrikes = 0;
-              lastSearchStrike = null;
-              clearOverlayDedupStrikes = 0;
+              // A real-progress tool (navigate, click, inspect, etc.)
+              // nulls out the drift anchor so a subsequent distinct
+              // web_search is not flagged as drift. We don't have any
+              // strike counters to reset here — dedup is now purely
+              // informative (the model gets an error and tries again).
               lastSuccessfulWebSearchQuery = null;
-              failedClickStrikesBySignature.clear();
             }
           }
           if (
@@ -1383,32 +1293,18 @@ export class CodexProvider implements AIProvider {
             prepared.prepared.name === "click" &&
             looksLikeFailedToolOutput(outputText)
           ) {
-            const target = summarizeToolArg(prepared.prepared.args);
+            // Push a recovery hint so the model knows the click did not
+            // complete and is steered toward a different target. The
+            // model is free to retry the same target if it really
+            // wants to — we just don't terminate the loop on retries,
+            // matching the OpenAI/Ollama provider's "tell the model
+            // it's wrong and let it try again" philosophy.
             currentInput.push(
               buildCodexFailedClickRecoveryInput(
-                target,
+                summarizeToolArg(prepared.prepared.args),
                 latestToolResultPreview,
               ),
             );
-            // Track per-signature failed-click strikes. The harness
-            // intentionally does NOT use the generic recent-signature
-            // dedup for clicks (different target after a failure is
-            // legitimate), but a *retry of the same failed target* is
-            // the model ignoring the recovery advice and burning turns.
-            // After MAX_DEDUP_STRIKES failed attempts of the same
-            // signature we terminate the loop.
-            const nextStrike =
-              (failedClickStrikesBySignature.get(toolSignature) ?? 0) + 1;
-            failedClickStrikesBySignature.set(toolSignature, nextStrike);
-            if (nextStrike >= MAX_DEDUP_STRIKES) {
-              terminatedByDedup = {
-                kind: "failed-click",
-                previousQuery: null,
-                pageUrl: extractCodexPageUrlFromPreview(latestToolResultPreview),
-                targetSummary: target || undefined,
-              };
-              break;
-            }
           }
           if (prepared.prepared.name === "read_page") {
             readPageCount += 1;
@@ -1448,17 +1344,6 @@ export class CodexProvider implements AIProvider {
             });
           }
           correctionCount = 0;
-        }
-        if (terminatedByDedup) {
-          onChunk(
-            buildCodexDedupTerminationChunk(
-              terminatedByDedup.kind,
-              terminatedByDedup.previousQuery,
-              terminatedByDedup.pageUrl,
-              terminatedByDedup.targetSummary,
-            ),
-          );
-          break;
         }
         if (completedByFallback) break;
         if (correctionCount >= 2) {
