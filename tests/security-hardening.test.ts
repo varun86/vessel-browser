@@ -605,7 +605,7 @@ test("Codex function call output marks failed executed tools as warning chips", 
 
   assert.equal(output.call_id, "call_failed_type");
   assert.match(output.output, /No element index/);
-  assert.equal(chunks.some((chunk) => chunk.includes("<<tool:type_text:⚠ failed>>")), true);
+  assert.equal(chunks.some((chunk) => chunk.includes("<<tool:type_text:⚠ failed cheap flights>>")), true);
   assert.equal(chunks.some((chunk) => chunk.includes("<<tool:type_text:cheap flights>>")), false);
 });
 
@@ -869,6 +869,346 @@ test("Codex agent recovers narrated action tool calls", async () => {
   );
 
   assert.deepEqual(calls, [{ name: "search", args: { query: "Hacker News" } }]);
+});
+
+test("Codex agent suppresses current-page re-search after successful web search", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const chunks: string[] = [];
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const query = "cheapest flight tomorrow from Portland to San Francisco";
+  let requestCount = 0;
+
+  await withMockFetch(async () => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_web_search",
+            name: "web_search",
+            arguments: JSON.stringify({ query }),
+          },
+        },
+      ]);
+    }
+    if (requestCount === 2) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_site_search",
+            name: "search",
+            arguments: JSON.stringify({ query }),
+          },
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "I found the current search results and will continue from them.",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "can you help me find the cheapest flight for tomorrow from portland to san francisco?",
+      [
+        {
+          name: "web_search",
+          description: "Search the open web",
+          input_schema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+        {
+          name: "search",
+          description: "Search within current site",
+          input_schema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+        {
+          name: "read_page",
+          description: "Read current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async (name, args) => {
+        calls.push({ name, args });
+        return `Web searched "${query}" via default search engine → https://duckduckgo.com/?q=cheapest%20flight%20tomorrow%20from%20Portland%20to%20San%20Francisco
+[state: url=https://duckduckgo.com/?q=cheapest%20flight%20tomorrow%20from%20Portland%20to%20San%20Francisco, title="DuckDuckGo Search"]`;
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.deepEqual(calls, [{ name: "web_search", args: { query } }]);
+  assert.equal(
+    chunks.some((chunk) => chunk.includes("<<tool:search:↻ duplicate suppressed>>")),
+    true,
+  );
+});
+
+test("Codex agent suppresses query-drifted web search after successful web search", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const chunks: string[] = [];
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const requestBodies: Array<Record<string, unknown>> = [];
+  let requestCount = 0;
+
+  await withMockFetch(async (_input, init) => {
+    requestCount += 1;
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestCount === 1) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_web_search",
+            name: "web_search",
+            arguments: JSON.stringify({
+              query: "cheapest flight tomorrow Portland to San Francisco",
+            }),
+          },
+        },
+      ]);
+    }
+    if (requestCount === 2) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_drifted_search",
+            name: "web_search",
+            arguments: JSON.stringify({
+              query: "Portland to San Francisco flights tomorrow cheapest",
+            }),
+          },
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "I will continue from the existing search results.",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "can you help me find the cheapest flight for tomorrow from portland to san francisco?",
+      [
+        {
+          name: "web_search",
+          description: "Search the open web",
+          input_schema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+        },
+        {
+          name: "read_page",
+          description: "Read current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async (name, args) => {
+        calls.push({ name, args });
+        return `Web searched "cheapest flight tomorrow Portland to San Francisco" via default search engine → https://duckduckgo.com/?q=cheapest+flight+tomorrow+Portland+to+San+Francisco
+[state: url=https://duckduckgo.com/?q=cheapest+flight+tomorrow+Portland+to+San+Francisco, title="DuckDuckGo Search"]`;
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.deepEqual(calls, [
+    {
+      name: "web_search",
+      args: { query: "cheapest flight tomorrow Portland to San Francisco" },
+    },
+  ]);
+  assert.equal(
+    chunks.some((chunk) => chunk.includes("<<tool:web_search:↻ duplicate suppressed>>")),
+    true,
+  );
+  assert.match(
+    JSON.stringify(requestBodies[2]?.input ?? []),
+    /already performed web_search successfully/,
+  );
+});
+
+test("Codex agent suppresses clear_overlays without an overlay signal", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const chunks: string[] = [];
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const requestBodies: Array<Record<string, unknown>> = [];
+  let requestCount = 0;
+
+  await withMockFetch(async (_input, init) => {
+    requestCount += 1;
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestCount === 1) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_clear",
+            name: "clear_overlays",
+            arguments: "{}",
+          },
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "I will use the page state instead.",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "can you help me find the cheapest flight for tomorrow from portland to san francisco?",
+      [
+        {
+          name: "clear_overlays",
+          description: "Clear blocking overlays",
+          input_schema: { type: "object", properties: {} },
+        },
+        {
+          name: "read_page",
+          description: "Read current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async (name, args) => {
+        calls.push({ name, args });
+        return "No blocking overlays detected";
+      },
+      () => undefined,
+    ),
+  );
+
+  assert.deepEqual(calls, []);
+  assert.equal(
+    chunks.some((chunk) => chunk.includes("<<tool:clear_overlays:↻ duplicate suppressed>>")),
+    true,
+  );
+  assert.match(
+    JSON.stringify(requestBodies[1]?.input ?? []),
+    /No blocking overlay signal is present/,
+  );
+});
+
+test("Codex agent recovers after a failed result click", async () => {
+  const provider = new CodexProvider(
+    {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      idToken: "",
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      accountId: "account-123",
+    },
+    "gpt-5",
+  );
+  const chunks: string[] = [];
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  await withMockFetch(async (_input, init) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (requestBodies.length === 1) {
+      return codexSseResponse([
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_click",
+            name: "click",
+            arguments: JSON.stringify({ index: 12 }),
+          },
+        },
+      ]);
+    }
+    return codexSseResponse([
+      {
+        type: "response.output_text.delta",
+        delta: "I will recover from the failed click.",
+      },
+    ]);
+  }, () =>
+    provider.streamAgentQuery(
+      "system",
+      "open the cheapest flight result",
+      [
+        {
+          name: "click",
+          description: "Click an element",
+          input_schema: {
+            type: "object",
+            properties: { index: { type: "number" } },
+            required: ["index"],
+          },
+        },
+        {
+          name: "read_page",
+          description: "Read current page",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      (chunk) => chunks.push(chunk),
+      async () =>
+        "Clicked: Result snippet (clicked)\nNote: Page did not change after click. The element may need a different interaction method. Consider read_page or inspect_element.",
+      () => undefined,
+    ),
+  );
+
+  assert.equal(chunks.some((chunk) => chunk.includes("<<tool:click:⚠ failed #12>>")), true);
+  const followUpInput = JSON.stringify(requestBodies[1]?.input ?? []);
+  assert.match(followUpInput, /previous click did not complete for #12/);
+  assert.match(followUpInput, /click a different result link by index/);
+  assert.match(followUpInput, /read_page\(mode=\\"results_only\\"\)/);
 });
 
 test("Codex agent suppresses repeated identical read_page loops", async () => {

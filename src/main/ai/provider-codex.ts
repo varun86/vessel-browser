@@ -114,7 +114,13 @@ function toolResultTextContent(result: string): string {
 }
 
 function summarizeToolArg(args: Record<string, unknown>): string {
-  return [args.url, args.query, args.text, args.direction]
+  const index =
+    typeof args.index === "number"
+      ? `#${args.index}`
+      : typeof args.index === "string" && args.index.trim()
+        ? `#${args.index.trim()}`
+        : "";
+  return [args.url, args.query, args.text, args.selector, index, args.direction]
     .map((value): string => typeof value === "string" ? value : "")
     .find((value) => value.length > 0) ?? "";
 }
@@ -138,9 +144,10 @@ function emitCodexToolChunk(
   args: Record<string, unknown>,
   output: string,
 ): void {
+  const summary = summarizeToolArg(args);
   const argSummary = looksLikeFailedToolOutput(output)
-    ? "⚠ failed"
-    : summarizeToolArg(args);
+    ? ["⚠ failed", summary].filter(Boolean).join(" ")
+    : summary;
   onChunk(`\n<<tool:${name}${argSummary ? ":" + argSummary : ""}>>\n`);
 }
 
@@ -261,6 +268,34 @@ function previewToolResult(text: string, maxLength = 800): string {
   return `${normalized.slice(0, maxLength)}...`;
 }
 
+function normalizedSearchToolQuery(
+  name: string,
+  args: Record<string, unknown>,
+): string | null {
+  if (name !== "search" && name !== "web_search") return null;
+  const raw =
+    typeof args.query === "string"
+      ? args.query
+      : typeof args.text === "string"
+        ? args.text
+        : typeof args.term === "string"
+          ? args.term
+          : "";
+  const normalized = raw.replace(/\s+/g, " ").trim().toLowerCase();
+  return normalized || null;
+}
+
+function hasBlockingOverlaySignal(text: string | null): boolean {
+  if (!text) return false;
+  if (/\bno blocking overlays detected\b/i.test(text)) return false;
+  return (
+    /\bwarning:\s*blocking overlay detected\b/i.test(text) ||
+    /\bblocked-by-overlay\b/i.test(text) ||
+    /###\s*immediate blockers\b/i.test(text) ||
+    /\bblocking overlays\W+[1-9]\d*\b/i.test(text)
+  );
+}
+
 function buildCodexLatestStateReminder(toolResultPreview: string | null): string {
   const text = (toolResultPreview || "").trim();
   if (!text) return "";
@@ -276,7 +311,9 @@ function buildCodexLatestStateReminder(toolResultPreview: string | null): string
     }
   }
 
-  const navigatedUrl = text.match(/\b(?:navigated to|went back to|went forward to|searched "[^"]+"(?: \(via search button\))? ->)\s+([^\s\n]+)/i)?.[1]?.trim();
+  const navigatedUrl =
+    text.match(/\b(?:navigated to|went back to|went forward to)\s+([^\s\n]+)/i)?.[1]?.trim() ??
+    text.match(/\b(?:web\s+)?searched "[^"]+"[^\n]*?(?:->|→)\s+([^\s\n]+)/i)?.[1]?.trim();
   const pageTitle = text.match(/\bPage title:\s*([^\n]+)/i)?.[1]?.trim();
   if (navigatedUrl) {
     return `Latest browser state: URL ${navigatedUrl}${pageTitle ? `, title "${pageTitle}"` : ""}. Trust the latest tool result over the initial page context.`;
@@ -392,6 +429,28 @@ function buildCodexHighlightFollowUpInput(
     lines.push(stateReminder);
   }
 
+  return {
+    type: "message",
+    role: "user",
+    content: [{ type: "input_text", text: lines.join("\n") }],
+  };
+}
+
+function buildCodexFailedClickRecoveryInput(
+  attemptedTarget: string,
+  latestToolResultPreview: string | null,
+): CodexInputItem {
+  const stateReminder = buildCodexLatestStateReminder(latestToolResultPreview);
+  const lines = [
+    `[System] The previous click did not complete${attemptedTarget ? ` for ${attemptedTarget}` : ""}.`,
+    `Do not repeat the same failed click.`,
+    `If the latest read_page result included Primary Results with [#N] indexes, click a different result link by index.`,
+    `If you do not have result indexes, call read_page(mode="results_only") once before clicking again.`,
+    `Avoid filters, sort controls, snippets, timestamps, and non-link text.`,
+  ];
+  if (stateReminder) {
+    lines.push(stateReminder);
+  }
   return {
     type: "message",
     role: "user",
@@ -766,6 +825,8 @@ export class CodexProvider implements AIProvider {
     let clickReadLoopNudged = false;
     let latestToolResultPreview: string | null = null;
     let accumulatedReadPageResults = "";
+    const recentSuccessfulSearchQueries: string[] = [];
+    let successfulWebSearchCount = 0;
     const requiresHighlight = wantsHighlightCompletion(userMessage);
     let hasHighlighted = false;
     let completedByFallback = false;
@@ -875,6 +936,22 @@ export class CodexProvider implements AIProvider {
             prepared.prepared.name,
             prepared.prepared.args,
           );
+          const searchToolQuery = normalizedSearchToolQuery(
+            prepared.prepared.name,
+            prepared.prepared.args,
+          );
+          const isRepeatedSearchAcrossTools =
+            searchToolQuery !== null &&
+            recentSuccessfulSearchQueries.includes(searchToolQuery);
+          const isQueryDriftedWebSearch =
+            prepared.prepared.name === "web_search" &&
+            successfulWebSearchCount > 0 &&
+            !isRepeatedSearchAcrossTools;
+          const isUnsupportedClearOverlay =
+            prepared.prepared.name === "clear_overlays" &&
+            !hasBlockingOverlaySignal(
+              `${systemPrompt}\n${latestToolResultPreview || ""}`,
+            );
           const isRepeatedReadPageBySignature =
             prepared.prepared.name === "read_page" &&
             consecutiveReadPageSignature === toolSignature &&
@@ -942,6 +1019,39 @@ export class CodexProvider implements AIProvider {
             correctionCount += 1;
             continue;
           }
+          if (isRepeatedSearchAcrossTools) {
+            onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
+            const output = createCodexToolOutput(
+              prepared.prepared.callId,
+              `Error: You already searched for "${searchToolQuery}" successfully. Do not search the same query again with ${prepared.prepared.name}. Continue from the current results with read_page, inspect_element, click, or the final answer.`,
+            );
+            currentInput.push(output);
+            latestToolResultPreview = previewToolResult(output.output);
+            correctionCount += 1;
+            continue;
+          }
+          if (isQueryDriftedWebSearch) {
+            onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
+            const output = createCodexToolOutput(
+              prepared.prepared.callId,
+              `Error: You already performed web_search successfully for this task. Do not rewrite or broaden the query with another web_search. Continue from the current results with read_page, inspect_element, click, or the final answer.`,
+            );
+            currentInput.push(output);
+            latestToolResultPreview = previewToolResult(output.output);
+            correctionCount += 1;
+            continue;
+          }
+          if (isUnsupportedClearOverlay) {
+            onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
+            const output = createCodexToolOutput(
+              prepared.prepared.callId,
+              `Error: No blocking overlay signal is present in the latest browser state. Do not call clear_overlays unless read_page or the page context explicitly reports a blocking overlay. Continue with read_page, inspect_element, click, or the final answer.`,
+            );
+            currentInput.push(output);
+            latestToolResultPreview = previewToolResult(output.output);
+            correctionCount += 1;
+            continue;
+          }
 
           const output = await executePreparedCodexFunctionCall(
             prepared.prepared,
@@ -958,6 +1068,34 @@ export class CodexProvider implements AIProvider {
             iterationHasHighlight = true;
           }
           latestToolResultPreview = previewToolResult(output.output);
+          const outputText = toolResultTextContent(output.output);
+          if (
+            searchToolQuery &&
+            !looksLikeFailedToolOutput(outputText) &&
+            !recentSuccessfulSearchQueries.includes(searchToolQuery)
+          ) {
+            recentSuccessfulSearchQueries.push(searchToolQuery);
+            if (recentSuccessfulSearchQueries.length > 4) {
+              recentSuccessfulSearchQueries.shift();
+            }
+          }
+          if (
+            prepared.prepared.name === "web_search" &&
+            !looksLikeFailedToolOutput(outputText)
+          ) {
+            successfulWebSearchCount += 1;
+          }
+          if (
+            prepared.prepared.name === "click" &&
+            looksLikeFailedToolOutput(outputText)
+          ) {
+            currentInput.push(
+              buildCodexFailedClickRecoveryInput(
+                summarizeToolArg(prepared.prepared.args),
+                latestToolResultPreview,
+              ),
+            );
+          }
           if (prepared.prepared.name === "read_page") {
             readPageCount += 1;
             accumulatedReadPageResults = `${accumulatedReadPageResults}\n${output.output}`.trim();
