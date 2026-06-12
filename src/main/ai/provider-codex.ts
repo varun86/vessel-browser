@@ -384,16 +384,21 @@ function buildCodexUnsupportedClearOverlayError(
 }
 
 function buildCodexDedupTerminationChunk(
-  kind: "search" | "clear-overlay",
+  kind: "search" | "clear-overlay" | "failed-click",
   previousQuery: string | null,
   pageUrl: string | null,
+  targetSummary?: string,
 ): string {
   const detail =
     kind === "search" && previousQuery
       ? `duplicate search ("${previousQuery}")`
       : kind === "search"
         ? "duplicate search"
-        : "fabricated clear_overlays (no overlay signal)";
+        : kind === "clear-overlay"
+          ? "fabricated clear_overlays (no overlay signal)"
+          : targetSummary
+            ? `repeated failed click (${targetSummary})`
+            : "repeated failed click";
   const pageHint = pageUrl ? ` on ${pageUrl}` : "";
   return `\n<<task_complete: stopped after ${detail}${pageHint} — see latest page results>>\n`;
 }
@@ -612,7 +617,7 @@ function buildCodexFailedClickRecoveryInput(
   const stateReminder = buildCodexLatestStateReminder(latestToolResultPreview);
   const lines = [
     `[System] The previous click did not complete${attemptedTarget ? ` for ${attemptedTarget}` : ""}.`,
-    `Do not repeat the same failed click.`,
+    `Do not retry the same click target${attemptedTarget ? ` (${attemptedTarget})` : ""} — the harness will terminate the task if you do.`,
     `If the latest read_page result included Primary Results with [#N] indexes, click a different result link by index.`,
     `If you do not have result indexes, call read_page(mode="results_only") once before clicking again.`,
     `Avoid filters, sort controls, snippets, timestamps, and non-link text.`,
@@ -1007,10 +1012,19 @@ export class CodexProvider implements AIProvider {
     let searchDedupStrikes = 0;
     let clearOverlayDedupStrikes = 0;
     let lastSearchStrike: { tool: string; query: string } | null = null;
+    // Click-failure strikes are tracked PER SIGNATURE so that the model
+    // is allowed to try a different result link (different index/text) but
+    // gets terminated if it retries the exact same target. The dedup
+    // signature is the same one used for the generic recent-signature
+    // dedup check below (stableToolSignature), so a stable JSON of the
+    // call's name + args. Reset on real progress (navigate, read_page of
+    // a different state, etc.).
+    const failedClickStrikesBySignature = new Map<string, number>();
     let terminatedByDedup: {
-      kind: "search" | "clear-overlay";
+      kind: "search" | "clear-overlay" | "failed-click";
       previousQuery: string | null;
       pageUrl: string | null;
+      targetSummary?: string;
     } | null = null;
     const MAX_DEDUP_STRIKES = 2;
 
@@ -1333,12 +1347,32 @@ export class CodexProvider implements AIProvider {
             prepared.prepared.name === "click" &&
             looksLikeFailedToolOutput(outputText)
           ) {
+            const target = summarizeToolArg(prepared.prepared.args);
             currentInput.push(
               buildCodexFailedClickRecoveryInput(
-                summarizeToolArg(prepared.prepared.args),
+                target,
                 latestToolResultPreview,
               ),
             );
+            // Track per-signature failed-click strikes. The harness
+            // intentionally does NOT use the generic recent-signature
+            // dedup for clicks (different target after a failure is
+            // legitimate), but a *retry of the same failed target* is
+            // the model ignoring the recovery advice and burning turns.
+            // After MAX_DEDUP_STRIKES failed attempts of the same
+            // signature we terminate the loop.
+            const nextStrike =
+              (failedClickStrikesBySignature.get(toolSignature) ?? 0) + 1;
+            failedClickStrikesBySignature.set(toolSignature, nextStrike);
+            if (nextStrike >= MAX_DEDUP_STRIKES) {
+              terminatedByDedup = {
+                kind: "failed-click",
+                previousQuery: null,
+                pageUrl: extractCodexPageUrlFromPreview(latestToolResultPreview),
+                targetSummary: target || undefined,
+              };
+              break;
+            }
           }
           if (prepared.prepared.name === "read_page") {
             readPageCount += 1;
@@ -1385,6 +1419,7 @@ export class CodexProvider implements AIProvider {
               terminatedByDedup.kind,
               terminatedByDedup.previousQuery,
               terminatedByDedup.pageUrl,
+              terminatedByDedup.targetSummary,
             ),
           );
           break;
