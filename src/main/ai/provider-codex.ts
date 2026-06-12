@@ -125,8 +125,16 @@ function summarizeToolArg(args: Record<string, unknown>): string {
     .find((value) => value.length > 0) ?? "";
 }
 
+function normalizeCodexText(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"');
+}
+
 function looksLikeFailedToolOutput(output: string): boolean {
-  const normalized = output.trim().toLowerCase();
+  const normalized = normalizeCodexText(output);
   return (
     normalized.startsWith("error") ||
     normalized.startsWith("warning") ||
@@ -135,6 +143,15 @@ function looksLikeFailedToolOutput(output: string): boolean {
     normalized.includes("same page — results may have loaded dynamically") ||
     normalized.includes("could not ") ||
     normalized.includes("did not ")
+  );
+}
+
+function looksLikeTravelFareContext(text: string): boolean {
+  const normalized = normalizeCodexText(text);
+  return (
+    /\b(?:flight|flights|fare|fares|airline|airlines|one-way|roundtrip|nonstop|layover|departure|arrival)\b/.test(normalized) ||
+    /\b(?:pdx|sfo|oak|sjc)\b/.test(normalized) ||
+    /\$[\d,]+/.test(normalized)
   );
 }
 
@@ -460,7 +477,7 @@ function shouldRetryCodexToolLoop(
 ): boolean {
   if (!hasToolHistory) return false;
 
-  const trimmed = text.trim().toLowerCase();
+  const trimmed = normalizeCodexText(text);
   if (!trimmed) return true;
 
   // The previous version of this function treated *any* forward-
@@ -492,6 +509,27 @@ function shouldRetryCodexToolLoop(
     "should i",
   ];
   if (askingUserForDirection.some((signal) => trimmed.includes(signal))) {
+    return true;
+  }
+
+  const askingUserToContinue = [
+    "please let me",
+    "let me inspect",
+    "let me click",
+    "need to continue from",
+    "i need to continue",
+    "allow me to",
+    "can't access or reuse",
+    "cant access or reuse",
+    "can't access",
+    "cant access",
+    "visible context",
+    "surface it",
+    "send me the current",
+    "send me the results",
+    "send me the pricing",
+  ];
+  if (askingUserToContinue.some((signal) => trimmed.includes(signal))) {
     return true;
   }
 
@@ -545,6 +583,7 @@ function buildCodexRecoveryInput(
 function buildCodexFailedClickRecoveryInput(
   attemptedTarget: string,
   latestToolResultPreview: string | null,
+  failedClickCount = 1,
 ): CodexInputItem {
   const stateReminder = buildCodexLatestStateReminder(latestToolResultPreview);
   // Keep the message short: the click did not complete, here's the
@@ -556,8 +595,18 @@ function buildCodexFailedClickRecoveryInput(
   // the model spiral through failed clicks in our transcripts.
   const lines = [
     `[System] The previous click did not complete${attemptedTarget ? ` for ${attemptedTarget}` : ""}.`,
-    `Take the next step: try a different target, refresh the page state with read_page, or call inspect_element on the intended element to verify its index and selector.`,
+    `Take the next step yourself: try a different target, refresh the page state with read_page, call inspect_element on the intended element, or answer from the results already visible in the conversation. Do not ask the user to inspect or click the result for you.`,
   ];
+  if (failedClickCount >= 2) {
+    lines.push(
+      `You have already had multiple failed clicks without making page progress. Do not keep clicking similar search result titles. Use the latest read_page/search result text to answer, or inspect a specific indexed result/control only if essential.`,
+    );
+  }
+  if (looksLikeTravelFareContext(`${attemptedTarget}\n${latestToolResultPreview || ""}`)) {
+    lines.push(
+      `For flight-price tasks, visible fare snippets are enough to compare candidates. If the results show prices, stops, airlines, or route names, report the cheapest visible option with caveats instead of trying to open every aggregator result.`,
+    );
+  }
   if (stateReminder) {
     lines.push(stateReminder);
   }
@@ -819,6 +868,7 @@ export class CodexProvider implements AIProvider {
     const recentToolNames: string[] = [];
     let clickReadLoopNudged = false;
     let latestToolResultPreview: string | null = null;
+    let failedClickCountSinceProgress = 0;
     const recentSuccessfulSearchQueries: string[] = [];
     const recentSuccessfulSearchToolByQuery = new Map<string, string>();
     // Track the LAST successful web_search query (or null if the last
@@ -1048,6 +1098,7 @@ export class CodexProvider implements AIProvider {
               // strike counters to reset here — dedup is now purely
               // informative (the model gets an error and tries again).
               lastSuccessfulWebSearchQuery = null;
+              failedClickCountSinceProgress = 0;
             }
           }
           if (
@@ -1083,6 +1134,7 @@ export class CodexProvider implements AIProvider {
             prepared.prepared.name === "click" &&
             looksLikeFailedToolOutput(outputText)
           ) {
+            failedClickCountSinceProgress += 1;
             // Push a recovery hint so the model knows the click did not
             // complete and is steered toward a different target. The
             // model is free to retry the same target if it really
@@ -1093,6 +1145,7 @@ export class CodexProvider implements AIProvider {
               buildCodexFailedClickRecoveryInput(
                 summarizeToolArg(prepared.prepared.args),
                 latestToolResultPreview,
+                failedClickCountSinceProgress,
               ),
             );
           }
