@@ -92,6 +92,18 @@ function webSearchCall(callId: string, query: string) {
   };
 }
 
+function readPageCall(callId: string) {
+  return {
+    type: "response.output_item.done",
+    item: {
+      type: "function_call",
+      call_id: callId,
+      name: "read_page",
+      arguments: "{}",
+    },
+  };
+}
+
 function clickCall(callId: string, index: number) {
   return {
     type: "response.output_item.done",
@@ -443,5 +455,184 @@ test(
     // 4 backend calls: 1st executes, 2nd & 3rd are drift errors,
     // 4th is the model's natural final answer.
     assert.equal(requestBodies.length, 4);
+  },
+);
+
+test(
+  "Codex harness does NOT suppress consecutive read_page calls (aligns with Ollama/OpenAI)",
+  { timeout: 10_000 },
+  async () => {
+    // The previous Codex provider suppressed read_page when called with
+    // the same signature 2+ times in a row. The user's transcript
+    // showed the model flailing through read_page → read_page →
+    // read_page (suppressed!) → web_search (suppressed!) → navigate
+    // (suppressed!) → ... because the dedup messages were pushing
+    // the model away from its natural tool choices. The OpenAI/Ollama
+    // provider never suppresses read_page this way — a model can read
+    // the page as many times as it needs to. This test pins that
+    // behavior.
+    const provider = new CodexProvider(codexTokens(), "gpt-5");
+    const chunks: string[] = [];
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const requestBodies: Array<Record<string, unknown>> = [];
+
+    await withMockFetch(async (_input, init) => {
+      requestBodies.push(
+        JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      );
+      const requestCount = requestBodies.length;
+
+      if (requestCount === 1) {
+        return codexSseResponse([readPageCall("call_read_1")]);
+      }
+      if (requestCount === 2) {
+        return codexSseResponse([readPageCall("call_read_2")]);
+      }
+      if (requestCount === 3) {
+        return codexSseResponse([readPageCall("call_read_3")]);
+      }
+      return codexSseResponse([
+        {
+          type: "response.output_text.delta",
+          delta: "I have enough context now.",
+        },
+      ]);
+    }, () =>
+      provider.streamAgentQuery(
+        "system prompt",
+        "look at the current page",
+        [WEB_SEARCH_TOOL, READ_PAGE_TOOL],
+        (chunk) => chunks.push(chunk),
+        async (name) => {
+          calls.push({ name, args: {} });
+          return "Page snapshot with 10 results.";
+        },
+        () => undefined,
+      ),
+    );
+
+    // All 3 read_page calls actually executed. None were suppressed
+    // by the harness.
+    const readPageCalls = calls.filter((c) => c.name === "read_page");
+    assert.equal(
+      readPageCalls.length,
+      3,
+      "all 3 read_page calls should execute (Ollama-style, no signature dedup)",
+    );
+
+    // No read_page suppression chunks.
+    const readPageSuppressionChunks = chunks.filter((chunk) =>
+      chunk.includes("<<tool:read_page:↻ duplicate suppressed>>"),
+    );
+    assert.equal(
+      readPageSuppressionChunks.length,
+      0,
+      "harness must not suppress read_page as a consecutive duplicate (align with Ollama)",
+    );
+
+    // No termination chunk.
+    const terminationChunks = chunks.filter((chunk) =>
+      chunk.includes("<<task_complete: stopped after"),
+    );
+    assert.equal(
+      terminationChunks.length,
+      0,
+      "no dedup-strike termination should fire on read_page loops",
+    );
+  },
+);
+
+test(
+  "Codex harness does not force-call highlight when the user asks for highlighting (aligns with Ollama/OpenAI)",
+  { timeout: 10_000 },
+  async () => {
+    // The previous Codex provider detected "highlight" in the user
+    // prompt and tried to FORCE the model to call highlight by
+    // suppressing other tools after 2 read_pages. The OpenAI/Ollama
+    // provider doesn't do this — the model decides when to call
+    // highlight. If the model doesn't, that's a model problem, not a
+    // harness problem. This test pins the new behavior: the harness
+    // doesn't force highlight, but it doesn't suppress highlight
+    // either — the model is free to call or not call highlight.
+    const provider = new CodexProvider(codexTokens(), "gpt-5");
+    const chunks: string[] = [];
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const requestBodies: Array<Record<string, unknown>> = [];
+
+    await withMockFetch(async (_input, init) => {
+      requestBodies.push(
+        JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      );
+      const requestCount = requestBodies.length;
+
+      if (requestCount === 1) {
+        return codexSseResponse([readPageCall("call_read_1")]);
+      }
+      if (requestCount === 2) {
+        return codexSseResponse([readPageCall("call_read_2")]);
+      }
+      if (requestCount === 3) {
+        return codexSseResponse([readPageCall("call_read_3")]);
+      }
+      // Model gives a natural final answer without calling highlight.
+      return codexSseResponse([
+        {
+          type: "response.output_text.delta",
+          delta: "Done.",
+        },
+      ]);
+    }, () =>
+      provider.streamAgentQuery(
+        "system prompt",
+        "highlight the news.ycombinator.com top stories",
+        [
+          {
+            name: "read_page",
+            description: "Read current page",
+            input_schema: { type: "object", properties: {} },
+          },
+          {
+            name: "highlight",
+            description: "Highlight page content",
+            input_schema: {
+              type: "object",
+              properties: { text: { type: "string" } },
+            },
+          },
+        ],
+        (chunk) => chunks.push(chunk),
+        async (name) => {
+          calls.push({ name, args: {} });
+          return "Page snapshot";
+        },
+        () => undefined,
+      ),
+    );
+
+    // All 3 read_page calls executed. NONE were suppressed by the
+    // highlight-budget check. The harness didn't force a highlight
+    // call on the model's behalf either (calls.filter('highlight')
+    // would be empty because the model didn't call it).
+    const readPageCalls = calls.filter((c) => c.name === "read_page");
+    assert.equal(
+      readPageCalls.length,
+      3,
+      "all 3 read_page calls should execute; the highlight-budget check must not fire",
+    );
+
+    // No highlight-budget suppression chunks.
+    const highlightSuppressionChunks = chunks.filter((chunk) =>
+      chunk.includes("highlight task"),
+    );
+    assert.equal(
+      highlightSuppressionChunks.length,
+      0,
+      "harness must not push the highlight-budget error message (align with Ollama)",
+    );
+
+    // The model wasn't forced to call highlight — it was free to
+    // decide. (calls.length === 3 means 3 read_page tool calls
+    // executed, and highlight is not in the list because the model
+    // didn't call it in this scripted scenario. That's expected.)
   },
 );
