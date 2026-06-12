@@ -66,6 +66,7 @@ const READ_PAGE_TOOL = {
 const ALL_TOOLS = [WEB_SEARCH_TOOL, READ_PAGE_TOOL];
 
 const FLIGHT_QUERY = "cheapest flight tomorrow from Portland to San Francisco";
+const FLIGHT_SEARCH_URL = `https://duckduckgo.com/?q=${encodeURIComponent(FLIGHT_QUERY)}`;
 
 function webSearchCall(callId: string, query: string) {
   return {
@@ -124,10 +125,8 @@ test(
         async (name, args) => {
           calls.push({ name, args });
           return [
-            `Web searched "${FLIGHT_QUERY}" via default search engine → https://duckduckgo.com/?q=${encodeURIComponent(FLIGHT_QUERY)}`,
-            "[state: url=https://duckduckgo.com/?q=" +
-              encodeURIComponent(FLIGHT_QUERY) +
-              ', title="DuckDuckGo Search"]',
+            `Web searched "${FLIGHT_QUERY}" via default search engine → ${FLIGHT_SEARCH_URL}`,
+            `[state: url=${FLIGHT_SEARCH_URL}, title="DuckDuckGo Search"]`,
           ].join("\n");
         },
         () => undefined,
@@ -168,6 +167,14 @@ test(
       ),
       true,
       "expected a <<task_complete: stopped after duplicate search>> chunk",
+    );
+    assert.equal(
+      chunks.some((chunk) =>
+        chunk.includes(`stopped after duplicate search`) &&
+        chunk.includes(` on ${FLIGHT_SEARCH_URL}`),
+      ),
+      true,
+      "expected the termination chunk to include the latest search-result URL",
     );
 
     // The actionable error message made it into the third backend request
@@ -253,10 +260,8 @@ test(
         async (name, args) => {
           calls.push({ name, args });
           return [
-            `Web searched "${FLIGHT_QUERY}" via default search engine → https://duckduckgo.com/?q=${encodeURIComponent(FLIGHT_QUERY)}`,
-            "[state: url=https://duckduckgo.com/?q=" +
-              encodeURIComponent(FLIGHT_QUERY) +
-              ', title="DuckDuckGo Search"]',
+            `Web searched "${FLIGHT_QUERY}" via default search engine → ${FLIGHT_SEARCH_URL}`,
+            `[state: url=${FLIGHT_SEARCH_URL}, title="DuckDuckGo Search"]`,
           ].join("\n");
         },
         () => undefined,
@@ -292,6 +297,14 @@ test(
         chunk.includes("<<task_complete: stopped after duplicate search"),
       ),
       true,
+    );
+    assert.equal(
+      chunks.some((chunk) =>
+        chunk.includes(`stopped after duplicate search`) &&
+        chunk.includes(` on ${FLIGHT_SEARCH_URL}`),
+      ),
+      true,
+      "expected the termination chunk to include the latest search-result URL",
     );
 
     // The actionable error on turn 2 (the search blocked by

@@ -300,6 +300,11 @@ function buildCodexLatestStateReminder(toolResultPreview: string | null): string
   const text = (toolResultPreview || "").trim();
   if (!text) return "";
 
+  const existingReminder = text.match(
+    /\bLatest browser state:\s*URL\s+.+?(?:Trust the latest tool result over the initial page context\.|$)/i,
+  )?.[0]?.trim();
+  if (existingReminder) return existingReminder;
+
   const stateMatch = text.match(
     /\[state:\s+url=([^,\]\n]+),\s+title=(?:"([^"]*)"|([^,\]\n]+))/i,
   );
@@ -399,6 +404,10 @@ function extractCodexPageUrlFromPreview(text: string | null): string | null {
     /\[state:\s+url=([^,\]\n]+),\s+title=/i,
   );
   if (stateMatch?.[1]) return stateMatch[1].trim();
+  const latestStateMatch = text.match(
+    /\bLatest browser state:\s*URL\s+(.+?)(?:, title|\.\s|$)/i,
+  );
+  if (latestStateMatch?.[1]) return latestStateMatch[1].trim();
   const navigated =
     text.match(/\b(?:navigated to|went back to|went forward to)\s+([^\s\n]+)/i)?.[1] ??
     text.match(/\b(?:web\s+)?searched "[^"]+"[^\n]*?(?:->|→)\s+([^\s\n]+)/i)?.[1];
