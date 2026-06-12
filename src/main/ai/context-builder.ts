@@ -1542,6 +1542,7 @@ export function buildScopedContext(
       const cartSnapshot = formatCartSnapshot(visiblePage);
       const visibleForms = visiblePage.forms;
       const dialogFocus = formatDialogFocus(page);
+      const flightBookingFormHint = getFlightBookingFormHint(page);
       const sections: string[] = [];
       sections.push(`**URL:** ${page.url}`);
       sections.push(`**Title:** ${page.title}`);
@@ -1561,6 +1562,11 @@ export function buildScopedContext(
       if ((page.pageIssues?.length ?? 0) > 0) {
         sections.push("### Page Access Warnings");
         sections.push(formatPageIssues(page.pageIssues ?? []));
+        sections.push("");
+      }
+      if (flightBookingFormHint) {
+        sections.push("### Flight Booking Hint");
+        sections.push(flightBookingFormHint);
         sections.push("");
       }
       if (page.overlays.length > 0) {
@@ -1750,6 +1756,52 @@ export function detectPageType(page: PageContent): PageType {
   return "GENERAL";
 }
 
+function isFlightBookingPage(page: PageContent): boolean {
+  const pageText = [
+    page.url,
+    page.title,
+    page.excerpt,
+    page.headings.map((heading) => heading.text).join(" "),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (/google\.com\/travel\/flights|google flights/.test(pageText)) {
+    return true;
+  }
+
+  const controlsText = [
+    ...page.interactiveElements,
+    ...page.forms.flatMap((form) => form.fields),
+  ]
+    .map((el) =>
+      [el.label, el.placeholder, el.name, el.text, el.role, el.inputType]
+        .filter(Boolean)
+        .join(" "),
+    )
+    .join(" ")
+    .toLowerCase();
+
+  const hasRouteControls =
+    /\b(?:where from|where to|origin|destination|from|to)\b/.test(
+      controlsText,
+    );
+  const hasDateControls = /\b(?:departure|depart|return|date)\b/.test(
+    controlsText,
+  );
+  const hasFlightLanguage = /\b(?:flight|flights|airfare|airline)\b/.test(
+    `${pageText} ${controlsText}`,
+  );
+
+  return hasFlightLanguage && hasRouteControls && hasDateControls;
+}
+
+function getFlightBookingFormHint(page: PageContent): string | null {
+  if (!isFlightBookingPage(page)) return null;
+  return "Flight booking form: use the visible route, destination, and date controls with type_text/select_option/click/submit_form before constructing direct Google Flights or travel-search URLs. Direct travel URLs are a fallback only after visible controls fail or the page is unusable.";
+}
+
 /**
  * Speedee System — Semantic Page Analysis
  * Detects page intent and suggests the most relevant actions,
@@ -1758,6 +1810,7 @@ export function detectPageType(page: PageContent): PageType {
 function analyzePageIntent(page: PageContent): string {
   const hints: string[] = [];
   const pageType = detectPageType(page);
+  const flightBookingFormHint = getFlightBookingFormHint(page);
   const hasPagination = page.interactiveElements.some(
     (el) =>
       (el.text || "").toLowerCase() === "next" ||
@@ -1796,6 +1849,7 @@ function analyzePageIntent(page: PageContent): string {
       hints.push(
         "Treat the visible site search box as the primary navigation control before jumping to direct URLs.",
       );
+      if (flightBookingFormHint) hints.push(flightBookingFormHint);
       break;
     case "SEARCH_RESULTS":
       hints.push("Page type: SEARCH RESULTS");
@@ -1816,6 +1870,7 @@ function analyzePageIntent(page: PageContent): string {
         `Page type: FORM (${formCount} form${formCount > 1 ? "s" : ""}, ${totalFields} fields)`,
       );
       hints.push("Suggested: vessel_fill_form → fill all fields in one call");
+      if (flightBookingFormHint) hints.push(flightBookingFormHint);
       break;
     }
     case "PAGINATED_LIST":
@@ -1828,7 +1883,14 @@ function analyzePageIntent(page: PageContent): string {
       break;
   }
 
-  if (hints.length === 0) return "";
+  if (hints.length === 0 && !flightBookingFormHint) return "";
+  if (
+    flightBookingFormHint &&
+    pageType !== "SEARCH_READY" &&
+    pageType !== "FORM"
+  ) {
+    hints.push(flightBookingFormHint);
+  }
   return `### Page Intent (Speedee)\n${hints.join("\n")}`;
 }
 

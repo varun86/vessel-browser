@@ -6,6 +6,7 @@ import {
   buildStructuredContext,
   chooseAgentReadMode,
 } from "../src/main/ai/context-builder";
+import { buildAgentSystemPrompt } from "../src/main/ai/agent-prompt";
 import { buildCompactScopedContext } from "../src/main/ai/compact-context";
 import type { PageContent } from "../src/shared/types";
 
@@ -411,6 +412,79 @@ test("visible_only marks travel-style fields as empty and directly fillable", ()
   );
   assert.doesNotMatch(context, /current="/);
   assert.doesNotMatch(context, /value="/);
+});
+
+test("visible_only tells agents to use flight booking controls before direct URLs", () => {
+  const context = buildScopedContext(
+    buildPage({
+      title: "Google Flights",
+      url: "https://www.google.com/travel/flights",
+      interactiveElements: [
+        {
+          type: "input",
+          label: "Where from?",
+          inputType: "combobox",
+          role: "combobox",
+          hasValue: true,
+          index: 12,
+          visible: true,
+          inViewport: true,
+          fullyInViewport: true,
+        },
+        {
+          type: "input",
+          label: "Where to?",
+          inputType: "combobox",
+          role: "combobox",
+          focused: true,
+          index: 13,
+          visible: true,
+          inViewport: true,
+          fullyInViewport: true,
+        },
+        {
+          type: "input",
+          label: "Departure date",
+          inputType: "text",
+          role: "textbox",
+          index: 14,
+          visible: true,
+          inViewport: true,
+          fullyInViewport: true,
+        },
+      ],
+    }),
+    "visible_only",
+  );
+
+  assert.match(context, /### Flight Booking Hint/);
+  assert.match(
+    context,
+    /use the visible route, destination, and date controls/i,
+  );
+  assert.match(context, /Direct travel URLs are a fallback only/i);
+});
+
+test("agent prompt makes direct travel URLs a fallback after visible controls", () => {
+  const prompt = buildAgentSystemPrompt({
+    profile: "compact",
+    activeTabTitle: "Google Flights",
+    activeTabUrl: "https://www.google.com/travel/flights",
+    defaultReadMode: "visible_only",
+    pageType: "FORM",
+    structuredContext: "",
+    supervisorPaused: false,
+    approvalMode: "auto",
+    pendingApprovals: 0,
+    recentCheckpoints: "",
+    taskTrackerContext: "",
+  });
+
+  assert.match(
+    prompt,
+    /On flight\/travel booking pages with visible route, destination, or date fields/i,
+  );
+  assert.match(prompt, /Direct travel URLs are a fallback only/i);
 });
 
 test("compact context keeps fill hints for visible fields", () => {
