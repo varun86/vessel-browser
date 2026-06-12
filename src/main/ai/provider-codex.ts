@@ -1001,7 +1001,16 @@ export class CodexProvider implements AIProvider {
     let accumulatedReadPageResults = "";
     const recentSuccessfulSearchQueries: string[] = [];
     const recentSuccessfulSearchToolByQuery = new Map<string, string>();
-    let successfulWebSearchCount = 0;
+    // Track the LAST successful web_search query (or null if the last
+    // real-progress action was something else). This drives the "drifted
+    // search" check below — which only fires when a *new* web_search comes
+    // in with no real progress since the previous one. Real progress
+    // (navigate, click, inspect, etc.) nulls this out, so a model doing
+    // a legitimately distinct search several turns after its first one
+    // is NOT treated as drifting. This is the fix for the false positive
+    // where a session-long counter flagged *every* new web_search as
+    // drift and the loop terminated after a single strike.
+    let lastSuccessfulWebSearchQuery: string | null = null;
     const requiresHighlight = wantsHighlightCompletion(userMessage);
     let hasHighlighted = false;
     let completedByFallback = false;
@@ -1140,10 +1149,23 @@ export class CodexProvider implements AIProvider {
           const isRepeatedSearchAcrossTools =
             searchToolQuery !== null &&
             recentSuccessfulSearchQueries.includes(searchToolQuery);
+          // A "drifted" web_search is a new web_search whose query is
+          // different from the *immediately preceding* successful
+          // web_search, AND no real progress happened in between. We
+          // check `lastSuccessfulWebSearchQuery` (set on a successful
+          // web_search, cleared by any other real-progress action) so a
+          // model that issues a distinct web_search several turns after
+          // a different one — with click/navigate/read_page in between
+          // — is NOT flagged. The previous design used a session-long
+          // counter (`successfulWebSearchCount > 0`) and fired on the
+          // first distinct web_search in the whole session, terminating
+          // the loop after a single strike even when the model was
+          // doing legitimate research.
           const isQueryDriftedWebSearch =
             prepared.prepared.name === "web_search" &&
-            successfulWebSearchCount > 0 &&
-            !isRepeatedSearchAcrossTools;
+            lastSuccessfulWebSearchQuery !== null &&
+            searchToolQuery !== null &&
+            searchToolQuery !== lastSuccessfulWebSearchQuery;
           const isUnsupportedClearOverlay =
             prepared.prepared.name === "clear_overlays" &&
             !hasBlockingOverlaySignal(
@@ -1203,12 +1225,14 @@ export class CodexProvider implements AIProvider {
               ? (recentSuccessfulSearchToolByQuery.get(searchToolQuery ?? "") ??
                 (prepared.prepared.name === "web_search" ? "search" : "web_search"))
               : "web_search";
-            const previousQuery =
-              isRepeatedSearchAcrossTools
-                ? (searchToolQuery ?? "")
-                : (successfulWebSearchCount > 0
-                  ? "(earlier web_search)"
-                  : "");
+            // For repeated searches, name the prior query verbatim so
+            // the model can see what it already searched for. For drifted
+            // searches, name the prior successful web_search so the model
+            // can pick a meaningfully different direction (or recognize
+            // that the prior search results are sufficient).
+            const previousQuery = isRepeatedSearchAcrossTools
+              ? (searchToolQuery ?? "")
+              : (lastSuccessfulWebSearchQuery ?? "");
             const mode: "repeated" | "drifted" = isRepeatedSearchAcrossTools
               ? "repeated"
               : "drifted";
@@ -1225,13 +1249,15 @@ export class CodexProvider implements AIProvider {
             latestToolResultPreview = previewToolResult(output.output);
             correctionCount += 1;
             searchDedupStrikes += 1;
+            // Record the prior query (not a literal "(drifted)") so the
+            // termination chunk can name the search the model is stuck on
+            // and the user (or a future log review) has something
+            // concrete to look at.
             lastSearchStrike = {
               tool: isRepeatedSearchAcrossTools
                 ? prepared.prepared.name
                 : "web_search",
-              query: isRepeatedSearchAcrossTools
-                ? previousQuery
-                : "(drifted)",
+              query: previousQuery,
             };
             if (searchDedupStrikes >= MAX_DEDUP_STRIKES) {
               terminatedByDedup = {
@@ -1312,12 +1338,16 @@ export class CodexProvider implements AIProvider {
           // (click, navigate, inspect_element, highlight, save_bookmark,
           // etc.) means the model has used the prior search result in
           // some way, so a future duplicate search is no longer the same
-          // stuck pattern.
+          // stuck pattern. The same real-progress block also clears
+          // `lastSuccessfulWebSearchQuery` so a fresh web_search several
+          // turns after the original (with intervening clicks/navigates)
+          // is NOT treated as drift.
           if (!looksLikeFailedToolOutput(outputText)) {
             if (isRealProgressTool(prepared.prepared.name)) {
               searchDedupStrikes = 0;
               lastSearchStrike = null;
               clearOverlayDedupStrikes = 0;
+              lastSuccessfulWebSearchQuery = null;
             }
           }
           if (
@@ -1341,7 +1371,13 @@ export class CodexProvider implements AIProvider {
             prepared.prepared.name === "web_search" &&
             !looksLikeFailedToolOutput(outputText)
           ) {
-            successfulWebSearchCount += 1;
+            // Record the prior successful web_search query so the next
+            // web_search can be checked for drift against it. Cleared by
+            // any real-progress tool, so a model that searches → clicks
+            // → searches (different query) is NOT flagged as drifting.
+            if (searchToolQuery) {
+              lastSuccessfulWebSearchQuery = searchToolQuery;
+            }
           }
           if (
             prepared.prepared.name === "click" &&
