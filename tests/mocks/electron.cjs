@@ -74,6 +74,8 @@ function createMockSession() {
 }
 
 const defaultSession = createMockSession();
+const ipcMainHandlers = new Map();
+const ipcMainListeners = new Map();
 
 module.exports = {
   app: {
@@ -103,6 +105,24 @@ module.exports = {
   clipboard: { writeText: () => {} },
   Menu: { buildFromTemplate: () => ({ popup: () => {} }) },
   MenuItem: class MenuItem {},
+  ipcMain: {
+    handle: (channel, listener) => {
+      ipcMainHandlers.set(channel, listener);
+    },
+    on: (channel, listener) => {
+      ipcMainListeners.set(channel, listener);
+    },
+    removeHandler: (channel) => {
+      ipcMainHandlers.delete(channel);
+    },
+    removeListener: (channel, listener) => {
+      if (ipcMainListeners.get(channel) === listener) {
+        ipcMainListeners.delete(channel);
+      }
+    },
+    _handlers: ipcMainHandlers,
+    _listeners: ipcMainListeners,
+  },
   session: {
     fromPartition: () => createMockSession(),
     defaultSession,

@@ -559,6 +559,23 @@ export async function scrollToHighlight(
   `);
 }
 
+export async function getHighlightTextAtIndex(
+  wc: WebContents,
+  index: number,
+): Promise<string | null> {
+  const safeIndex = Math.floor(Number(index));
+  return wc.executeJavaScript(`
+    (function() {
+      var highlights = document.querySelectorAll(${HIGHLIGHT_SELECTOR});
+      if (${safeIndex} < 0 || ${safeIndex} >= highlights.length) return null;
+      var el = highlights[${safeIndex}];
+      var text = el.getAttribute && el.getAttribute('data-vessel-highlight-text');
+      if (!text && el.textContent) text = el.textContent;
+      return text ? text.trim() : null;
+    })()
+  `);
+}
+
 export async function removeHighlightAtIndex(
   wc: WebContents,
   index: number,

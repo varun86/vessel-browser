@@ -5,10 +5,12 @@ import {
   highlightOnPage,
   getHighlightCount,
   scrollToHighlight,
+  getHighlightTextAtIndex,
   removeHighlightAtIndex,
   clearAllHighlightElements,
 } from "../highlights/inject";
 import { captureSelectionHighlight, persistAndMarkHighlight } from "../highlights/capture";
+import * as highlightsManager from "../highlights/manager";
 import {
   getActiveTabInfo,
   assertTrustedIpcSender,
@@ -118,8 +120,16 @@ export function registerHighlightHandlers(
     const info = getActiveTabInfo(tabManager);
     if (!info) return false;
     try {
+      const url = highlightsManager.normalizeUrl(info.wc.getURL());
+      const text = await getHighlightTextAtIndex(info.wc, validatedIndex);
       const removed = await removeHighlightAtIndex(info.wc, validatedIndex);
       if (removed) {
+        if (text) {
+          const persisted = highlightsManager.findHighlightByText(url, text);
+          if (persisted) {
+            highlightsManager.removeHighlight(persisted.id);
+          }
+        }
         await emitHighlightCount();
       }
       return removed;
@@ -134,6 +144,8 @@ export function registerHighlightHandlers(
     const info = getActiveTabInfo(tabManager);
     if (!info) return false;
     try {
+      const url = highlightsManager.normalizeUrl(info.wc.getURL());
+      highlightsManager.clearHighlightsForUrl(url);
       const cleared = await clearAllHighlightElements(info.wc);
       if (cleared) {
         await emitHighlightCount();

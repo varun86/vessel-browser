@@ -6,5 +6,6 @@ export const WebContentsView = cjs.WebContentsView;
 export const clipboard = cjs.clipboard;
 export const Menu = cjs.Menu;
 export const MenuItem = cjs.MenuItem;
+export const ipcMain = cjs.ipcMain;
 export const session = cjs.session;
 export default cjs;
