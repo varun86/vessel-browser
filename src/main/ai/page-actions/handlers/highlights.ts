@@ -30,8 +30,10 @@ export async function handleHighlight(
   return highlightOnPage(wc, selector, highlightText, args.label, args.durationMs, highlightColor);
 }
 
-export function handleClearHighlights(ctx: ActionContext): string {
+export async function handleClearHighlights(ctx: ActionContext): Promise<string> {
   const wc = ctx.tabManager.getActiveTab()?.view.webContents;
   if (!wc) return "Error: No active tab";
+  const url = highlightsManager.normalizeUrl(wc.getURL());
+  highlightsManager.clearHighlightsForUrl(url);
   return clearHighlights(wc);
 }
