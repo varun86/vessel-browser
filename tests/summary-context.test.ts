@@ -487,6 +487,26 @@ test("agent prompt makes direct travel URLs a fallback after visible controls", 
   assert.match(prompt, /Direct travel URLs are a fallback only/i);
 });
 
+test("agent prompt steers named venue questions toward official sites", () => {
+  const prompt = buildAgentSystemPrompt({
+    profile: "default",
+    activeTabTitle: "DuckDuckGo Search",
+    activeTabUrl: "https://duckduckgo.com/?q=moreland+theater",
+    defaultReadMode: "summary",
+    pageType: "SEARCH_RESULTS",
+    structuredContext: "",
+    supervisorPaused: false,
+    approvalMode: "auto",
+    pendingApprovals: 0,
+    recentCheckpoints: "",
+    taskTrackerContext: "",
+  });
+
+  assert.match(prompt, /named venue, business, organization, school, or local place/i);
+  assert.match(prompt, /open that site and answer from its page/i);
+  assert.match(prompt, /Do not keep rewriting generic web_search queries/i);
+});
+
 test("compact context keeps fill hints for visible fields", () => {
   const context = buildCompactScopedContext(
     buildPage({

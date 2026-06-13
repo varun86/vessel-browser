@@ -7,7 +7,10 @@ import {
   extractLlamaCppCtxSize,
   fetchProviderModels,
 } from "../src/main/ai/provider";
-import { formatOpenAICompatErrorMessage } from "../src/main/ai/provider-openai";
+import {
+  buildOpenAIRepeatedSearchError,
+  formatOpenAICompatErrorMessage,
+} from "../src/main/ai/provider-openai";
 import { refreshAccessToken } from "../src/main/ai/codex-oauth";
 import {
   clearStoredCodexTokens,
@@ -113,6 +116,19 @@ test("formatOpenAICompatErrorMessage leaves non-OpenRouter timeout text unchange
   const raw = "API request returned None after all retries";
 
   assert.equal(formatOpenAICompatErrorMessage("openai", raw), raw);
+});
+
+test("buildOpenAIRepeatedSearchError steers venue lookups toward direct results", () => {
+  const message = buildOpenAIRepeatedSearchError(
+    "web_search",
+    "moreland theater portland oregon movie playing this tuesday",
+    'Web searched "Moreland Theater Portland Oregon movie playing this Tuesday" via DuckDuckGo → https://duckduckgo.com/?q=moreland+theater [state: url=https://duckduckgo.com/?q=moreland+theater, title="DuckDuckGo Search"]',
+    "drifted",
+  );
+
+  assert.match(message, /use the current search results instead/i);
+  assert.match(message, /prefer opening the official site or clearly direct result/i);
+  assert.match(message, /Do not call any search tool again as preparation/i);
 });
 
 test("fetchProviderModels refreshes expired Codex tokens before model discovery", async () => {

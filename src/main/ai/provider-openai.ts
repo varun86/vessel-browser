@@ -375,6 +375,56 @@ export function buildLatestStateReminder(toolResultPreview: string): string {
   return '';
 }
 
+function normalizedSearchToolQuery(
+  name: string,
+  args: Record<string, unknown>,
+): string | null {
+  if (name !== 'search' && name !== 'web_search') return null;
+  const raw =
+    typeof args.query === 'string'
+      ? args.query
+      : typeof args.text === 'string'
+        ? args.text
+        : typeof args.term === 'string'
+          ? args.term
+          : '';
+  const normalized = raw.replace(/\s+/g, ' ').trim().toLowerCase();
+  return normalized || null;
+}
+
+function isRealProgressTool(name: string): boolean {
+  return ![
+    'read_page',
+    'current_tab',
+    'list_tabs',
+    'screenshot',
+    'web_search',
+    'search',
+  ].includes(name);
+}
+
+export function buildOpenAIRepeatedSearchError(
+  previousTool: string,
+  previousQuery: string,
+  latestToolResultPreview: string | null,
+  mode: 'repeated' | 'drifted',
+): string {
+  const stateReminder = buildLatestStateReminder(latestToolResultPreview || '');
+  const lines = [
+    mode === 'drifted'
+      ? `Error: You already performed ${previousTool} successfully for this task.`
+      : `Error: You already searched for "${previousQuery}" successfully with ${previousTool}.`,
+    mode === 'drifted'
+      ? `Do not rewrite or broaden the query with another ${previousTool}; use the current search results instead.`
+      : `Do not search the same query again with ${previousTool} or its search/web_search alias; use the current search results instead.`,
+    `For named venues, businesses, organizations, schools, or local places, prefer opening the official site or clearly direct result from the current results page before answering. Next action: click a result, inspect a specific result, or answer from the result you already opened. Do not call any search tool again as preparation.`,
+  ];
+  if (stateReminder) {
+    lines.push(stateReminder);
+  }
+  return lines.join(' ');
+}
+
 function shouldRecoverCompactStall(
   text: string,
   userMessage?: string,
@@ -650,6 +700,9 @@ export class OpenAICompatProvider implements AIProvider {
       const recentCompactToolSignatures: string[] = [];
       const recentToolNames: string[] = [];
       const successfulToolNames: string[] = [];
+      const recentSuccessfulSearchQueries: string[] = [];
+      const recentSuccessfulSearchToolByQuery = new Map<string, string>();
+      let lastSuccessfulWebSearchQuery: string | null = null;
       let clickReadLoopNudged = false;
       for (let i = 0; i < maxIterations; i++) {
         iterationsUsed = i + 1;
@@ -936,6 +989,42 @@ export class OpenAICompatProvider implements AIProvider {
           args = coerceToolArgsForExecution(tc.name, args);
 
           const toolSignature = stableToolSignature(tc.name, args);
+          const searchToolQuery = normalizedSearchToolQuery(tc.name, args);
+          const isRepeatedSearchAcrossTools =
+            searchToolQuery !== null &&
+            recentSuccessfulSearchQueries.includes(searchToolQuery);
+          const isQueryDriftedWebSearch =
+            tc.name === 'web_search' &&
+            lastSuccessfulWebSearchQuery !== null &&
+            searchToolQuery !== null &&
+            searchToolQuery !== lastSuccessfulWebSearchQuery;
+          if (isRepeatedSearchAcrossTools || isQueryDriftedWebSearch) {
+            onChunk(`\n<<tool:${tc.name}:↻ duplicate suppressed>>\n`);
+            const previousTool = isRepeatedSearchAcrossTools
+              ? (recentSuccessfulSearchToolByQuery.get(searchToolQuery ?? '') ??
+                (tc.name === 'web_search' ? 'search' : 'web_search'))
+              : 'web_search';
+            const previousQuery = isRepeatedSearchAcrossTools
+              ? (searchToolQuery ?? '')
+              : (lastSuccessfulWebSearchQuery ?? '');
+            const mode: 'repeated' | 'drifted' = isRepeatedSearchAcrossTools
+              ? 'repeated'
+              : 'drifted';
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: buildOpenAIRepeatedSearchError(
+                previousTool,
+                previousQuery,
+                latestToolMessage
+                  ? String(latestToolMessage.content || '')
+                  : null,
+                mode,
+              ),
+            });
+            compactCorrectionCount += 1;
+            continue;
+          }
           if (
             this.agentToolProfile === 'compact' &&
             tc.name === 'click' &&
@@ -1030,6 +1119,25 @@ export class OpenAICompatProvider implements AIProvider {
           }
           if (!/^Error:/i.test(toolContent.trim())) {
             successfulToolNames.push(tc.name);
+            if (isRealProgressTool(tc.name)) {
+              lastSuccessfulWebSearchQuery = null;
+            }
+            if (
+              searchToolQuery &&
+              !recentSuccessfulSearchQueries.includes(searchToolQuery)
+            ) {
+              recentSuccessfulSearchQueries.push(searchToolQuery);
+              recentSuccessfulSearchToolByQuery.set(searchToolQuery, tc.name);
+              if (recentSuccessfulSearchQueries.length > 4) {
+                const dropped = recentSuccessfulSearchQueries.shift();
+                if (dropped) {
+                  recentSuccessfulSearchToolByQuery.delete(dropped);
+                }
+              }
+            }
+            if (tc.name === 'web_search' && searchToolQuery) {
+              lastSuccessfulWebSearchQuery = searchToolQuery;
+            }
           }
 
           // Detect click→read_page alternating loop: the model clicks, reads
