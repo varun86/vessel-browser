@@ -60,7 +60,7 @@ function vesselIsEditableElement(el) {
   if (!(el instanceof HTMLElement)) return false;
   var role = (el.getAttribute("role") || "").toLowerCase();
   return el.isContentEditable ||
-    el.getAttribute("contenteditable") === "true" ||
+    (el.hasAttribute("contenteditable") && el.getAttribute("contenteditable") !== "false") ||
     role === "textbox" ||
     role === "searchbox";
 }
@@ -69,7 +69,7 @@ function vesselResolveFillableControl(el) {
   if (!el) return null;
   if (vesselIsNativeField(el) || vesselIsEditableElement(el)) return el;
   if (!(el instanceof Element)) return null;
-  var nested = el.querySelector("input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [contenteditable='true'], [role='textbox'], [role='searchbox']");
+  var nested = el.querySelector("input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], [role='searchbox']");
   return nested instanceof HTMLElement ? nested : null;
 }
 
@@ -87,7 +87,7 @@ function vesselFindVisibleFillableControl(original) {
 
   var scopes = Array.from(document.querySelectorAll("dialog[open], [role='dialog'], [role='alertdialog'], [aria-modal='true'], [role='listbox'], [role='combobox'][aria-expanded='true']"));
   scopes.push(document.body);
-  var selector = "input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [contenteditable='true'], [role='textbox'], [role='searchbox']";
+  var selector = "input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], [role='searchbox']";
   for (var i = 0; i < scopes.length; i += 1) {
     var scope = scopes[i];
     if (!scope || !(scope instanceof Element)) continue;
@@ -416,7 +416,7 @@ async function resolveFieldSelector(
           if (!(el instanceof HTMLElement)) return false;
           var role = (el.getAttribute("role") || "").toLowerCase();
           return el.isContentEditable ||
-            el.getAttribute("contenteditable") === "true" ||
+            (el.hasAttribute("contenteditable") && el.getAttribute("contenteditable") !== "false") ||
             role === "textbox" ||
             role === "searchbox" ||
             role === "combobox";
@@ -456,7 +456,7 @@ async function resolveFieldSelector(
           return score;
         }
 
-        const candidates = Array.from(document.querySelectorAll("input, textarea, select, [contenteditable='true'], [role='textbox'], [role='searchbox'], [role='combobox']"));
+        const candidates = Array.from(document.querySelectorAll("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], [role='searchbox'], [role='combobox']"));
         let best = null;
         let bestScore = -1;
         for (const el of candidates) {

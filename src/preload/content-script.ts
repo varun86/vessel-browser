@@ -83,7 +83,7 @@ let lastPageDiffSignature = "";
 const PAGE_DIFF_ACTIVITY_THROTTLE_MS = 350;
 const PAGE_DIFF_MUTATION_DEBOUNCE_MS = 1200;
 const CUSTOM_TEXT_FIELD_SELECTOR =
-  '[contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]';
+  '[contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="searchbox"], [role="combobox"]';
 
 function normalizeSignatureText(value: string | null | undefined): string {
   return (value || "").replace(/\s+/g, " ").trim();
@@ -1242,7 +1242,8 @@ function shouldExposeCustomTextField(el: Element): boolean {
   const role = getElementRole(el);
   return (
     el.isContentEditable ||
-    el.getAttribute("contenteditable") === "true" ||
+    (el.hasAttribute("contenteditable") &&
+      el.getAttribute("contenteditable") !== "false") ||
     role === "textbox" ||
     role === "searchbox" ||
     role === "combobox"
@@ -1254,7 +1255,7 @@ function getCustomTextFieldInputType(el: Element): string | undefined {
   if (role === "searchbox") return "search";
   if (role === "combobox") return "combobox";
   if (role === "textbox") return "text";
-  return el.getAttribute("contenteditable") === "true" ? "text" : undefined;
+  return el instanceof HTMLElement && el.isContentEditable ? "text" : undefined;
 }
 
 function getCustomTextFieldHasValue(el: Element): boolean | undefined {

@@ -144,6 +144,28 @@ test("setElementValue fills ARIA/contenteditable text controls", async () => {
   }
 });
 
+test("setElementValue fills contenteditable controls without explicit true value", async () => {
+  const { window, restore } = installDom(`
+    <!doctype html>
+    <html>
+      <body>
+        <div id="airport" aria-label="Airport" contenteditable></div>
+      </body>
+    </html>
+  `);
+  const airport = window.document.querySelector("#airport");
+  assert.ok(airport);
+
+  try {
+    const result = await setElementValue(createWebContents(), "#airport", "PDX");
+
+    assert.match(result, /Typed into: Airport = PDX/);
+    assert.equal(airport.textContent, "PDX");
+  } finally {
+    restore();
+  }
+});
+
 test("setElementValue opens combobox activators and fills the revealed input", async () => {
   const { window, restore } = installDom(`
     <!doctype html>
@@ -214,6 +236,28 @@ test("implicit text target can use the focused ARIA combobox after a click", asy
     <html>
       <body>
         <button id="destination" role="combobox" aria-label="Where to? Search airports or cities">Where to?</button>
+      </body>
+    </html>
+  `);
+  const destination = window.document.querySelector("#destination");
+  assert.ok(destination instanceof window.HTMLElement);
+  destination.focus();
+
+  try {
+    const selector = await locateImplicitTextTarget(createWebContents());
+
+    assert.equal(selector, "#destination");
+  } finally {
+    restore();
+  }
+});
+
+test("implicit text target recognizes contenteditable controls without explicit true value", async () => {
+  const { window, restore } = installDom(`
+    <!doctype html>
+    <html>
+      <body>
+        <div id="destination" aria-label="Destination" contenteditable></div>
       </body>
     </html>
   `);
