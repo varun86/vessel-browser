@@ -690,19 +690,21 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: "highlight",
     title: "Highlight Element",
     description:
-      "Visually highlight an element or text on the page for the user. Use to draw attention to specific content. Highlights persist until cleared.",
+      "Visually highlight page content for the user. For named items like story titles, result titles, links, headings, or article passages, prefer text with the exact visible title/text. Use index only when you have a current read_page element index for that exact item. Highlights persist until cleared.",
     inputSchema: {
+      text: normalizedOptionalStringSchema().describe(
+        "Exact visible text/title to find and highlight on the page. Preferred for story titles, result titles, links, headings, and passages.",
+      ),
       index: z
         .number()
         .optional()
-        .describe("Element index from page content to highlight"),
+        .describe(
+          "Element index from the latest page content listing. Use only when it identifies the exact item to highlight.",
+        ),
       selector: z
         .string()
         .optional()
         .describe("CSS selector of element to highlight"),
-      text: normalizedOptionalStringSchema().describe(
-        "Text to find and highlight on the page (all occurrences)",
-      ),
       label: z
         .string()
         .optional()

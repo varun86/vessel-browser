@@ -569,3 +569,36 @@ export function recoverNarratedActionToolCalls(
 
   return recovered;
 }
+
+export function shouldRetryUnexecutedHighlightCompletion(
+  userMessage: string,
+  assistantText: string,
+  successfulToolNames: readonly string[],
+): boolean {
+  const userAskedForHighlights = /\b(?:highlight|highlights|mark|annotate)\b/i.test(
+    userMessage,
+  );
+  if (!userAskedForHighlights || successfulToolNames.includes('highlight')) {
+    return false;
+  }
+
+  const normalizedAssistant = assistantText.toLowerCase();
+  return (
+    /\b(?:highlighted|marked|annotated)\b/.test(normalizedAssistant) ||
+    /\b(?:green|yellow|red|blue|purple|orange)\s+highlights?\b/.test(
+      normalizedAssistant,
+    ) ||
+    /\bhighlights?\s+(?:added|shown|applied|visible|on the page)\b/.test(
+      normalizedAssistant,
+    )
+  );
+}
+
+export function buildHighlightToolCompletionPrompt(): string {
+  return (
+    `The user asked you to highlight items on the page, but no highlight tool call succeeded. ` +
+    `Do not claim visual highlights are present until you call the supported highlight tool. ` +
+    `Use read_page only if you need current page text, then call highlight with {"text":"exact visible title or passage"} for each item you want to mark. ` +
+    `Use an element index only when the latest read_page result gives the exact current index for that same item.`
+  );
+}

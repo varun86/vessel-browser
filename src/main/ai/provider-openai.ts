@@ -15,12 +15,14 @@ import { LLAMA_CPP_MIN_CTX_TOKENS, LLAMA_CPP_RECOMMENDED_CTX_TOKENS } from './co
 import { createLogger } from '../../shared/logger';
 import { TERMINAL_TOOL_RESULT } from './tool-control';
 import {
+  buildHighlightToolCompletionPrompt,
   coerceToolArgsForExecution,
   isTargetlessClickArgs,
   parseToolArgsWithRepair,
   recoverNarratedActionToolCalls,
   recoverTextEncodedToolCalls,
   resolveToolCallName,
+  shouldRetryUnexecutedHighlightCompletion,
   stableToolSignature,
   unsupportedToolHint,
 } from './provider-openai-tools';
@@ -616,9 +618,11 @@ export class OpenAICompatProvider implements AIProvider {
       let iterationsUsed = 0;
       let compactRecoveryCount = 0;
       let flightPriceEvidenceRecoveryCount = 0;
+      let highlightCompletionRecoveryCount = 0;
       let compactCorrectionCount = 0;
       const recentCompactToolSignatures: string[] = [];
       const recentToolNames: string[] = [];
+      const successfulToolNames: string[] = [];
       let clickReadLoopNudged = false;
       for (let i = 0; i < maxIterations; i++) {
         iterationsUsed = i + 1;
@@ -832,6 +836,22 @@ export class OpenAICompatProvider implements AIProvider {
             });
             continue;
           }
+          if (
+            highlightCompletionRecoveryCount < 1 &&
+            shouldRetryUnexecutedHighlightCompletion(
+              userMessage,
+              textAccum,
+              successfulToolNames,
+            )
+          ) {
+            highlightCompletionRecoveryCount += 1;
+            if (textAccum.trim()) onChunk('<<erase_prev>>');
+            messages.push({
+              role: 'user',
+              content: `[System] ${buildHighlightToolCompletionPrompt()}`,
+            });
+            continue;
+          }
           break;
         }
         compactRecoveryCount = 0;
@@ -979,6 +999,9 @@ export class OpenAICompatProvider implements AIProvider {
             if (recentCompactToolSignatures.length > 4) {
               recentCompactToolSignatures.shift();
             }
+          }
+          if (!/^Error:/i.test(toolContent.trim())) {
+            successfulToolNames.push(tc.name);
           }
 
           // Detect click→read_page alternating loop: the model clicks, reads
