@@ -7,6 +7,7 @@ import {
   extractLlamaCppCtxSize,
   fetchProviderModels,
 } from "../src/main/ai/provider";
+import { formatOpenAICompatErrorMessage } from "../src/main/ai/provider-openai";
 import { refreshAccessToken } from "../src/main/ai/codex-oauth";
 import {
   clearStoredCodexTokens,
@@ -93,6 +94,25 @@ test("buildLlamaCppCtxWarning recommends more headroom for mid-sized ctx", () =>
 
 test("buildLlamaCppCtxWarning is quiet when ctx size is already healthy", () => {
   assert.equal(buildLlamaCppCtxWarning(32768), undefined);
+});
+
+test("formatOpenAICompatErrorMessage explains OpenRouter timeout/no-content failures", () => {
+  const message = formatOpenAICompatErrorMessage(
+    "openrouter",
+    "Agent failed (Function processsingleitem_agent timed out after 90.0 seconds), API failed (API request returned None after all retries)",
+  );
+
+  assert.match(
+    message,
+    /OpenRouter reported an upstream model timeout\/no-content failure/,
+  );
+  assert.match(message, /pin a specific low-latency tool-calling model/);
+});
+
+test("formatOpenAICompatErrorMessage leaves non-OpenRouter timeout text unchanged", () => {
+  const raw = "API request returned None after all retries";
+
+  assert.equal(formatOpenAICompatErrorMessage("openai", raw), raw);
 });
 
 test("fetchProviderModels refreshes expired Codex tokens before model discovery", async () => {

@@ -106,6 +106,19 @@ function toOpenAIReasoningEffort(
   }
 }
 
+function openRouterRoutingOptions(
+  providerId: ProviderId,
+): Record<string, unknown> {
+  if (providerId !== 'openrouter') return {};
+
+  return {
+    provider: {
+      require_parameters: true,
+      sort: 'latency',
+    },
+  };
+}
+
 function followUpReminderForProfile(
   profile: AgentToolProfile,
   userMessage: string,
@@ -471,6 +484,19 @@ export function formatOpenAICompatErrorMessage(
   message: string,
 ): string {
   if (
+    providerId === 'openrouter' &&
+    /(timed out after \d+(?:\.\d+)? seconds|request timed out|returned none after all retries|no content|empty response)/i.test(
+      message,
+    )
+  ) {
+    return (
+      `${message} ` +
+      `OpenRouter reported an upstream model timeout/no-content failure. ` +
+      `If this persists, retry or pin a specific low-latency tool-calling model instead of the free router.`
+    );
+  }
+
+  if (
     providerId === 'llama_cpp' &&
     /(available context size|context size exceeded|exceeds the available context size|try increasing it)/i.test(
       message,
@@ -545,6 +571,7 @@ export class OpenAICompatProvider implements AIProvider {
           max_tokens: 4096,
           stream: true,
           messages,
+          ...openRouterRoutingOptions(this.providerId),
           ...openAIPromptCacheOptions({
             providerId: this.providerId,
             model: this.model,
@@ -649,6 +676,7 @@ export class OpenAICompatProvider implements AIProvider {
             tools: openAITools,
             tool_choice: 'auto',
             temperature: agentTemperatureForProfile(this.agentToolProfile),
+            ...openRouterRoutingOptions(this.providerId),
             ...openAIPromptCacheOptions({
               providerId: this.providerId,
               model: this.model,
