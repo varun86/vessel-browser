@@ -322,6 +322,276 @@ test(
 );
 
 test(
+  "Codex harness nudges when the model asks the user to let it inspect existing results",
+  { timeout: 10_000 },
+  async () => {
+    const provider = new CodexProvider(codexTokens(), "gpt-5");
+    const chunks: string[] = [];
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const requestBodies: Array<Record<string, unknown>> = [];
+
+    await withMockFetch(async (_input, init) => {
+      requestBodies.push(
+        JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      );
+      const requestCount = requestBodies.length;
+
+      if (requestCount === 1) {
+        return codexSseResponse([
+          webSearchCall("call_search", "cheap flights Portland to San Francisco June 23"),
+        ]);
+      }
+      if (requestCount === 2) {
+        return codexSseResponse([
+          clickCall("call_click", 3),
+        ]);
+      }
+      if (requestCount === 3) {
+        return codexSseResponse([
+          {
+            type: "response.output_text.delta",
+            delta:
+              "I can help find the cheapest flight, but I need to continue from the existing search results already open in the browser. Please let me inspect/click one of the current flight results so I can compare the fares and report the cheapest option.",
+          },
+        ]);
+      }
+      return codexSseResponse([
+        readPageCall("call_read"),
+      ]);
+    }, () =>
+      provider.streamAgentQuery(
+        "system prompt",
+        "I need to book a flight from portland to SF on June 23rd - can you help me find the cheapest one?",
+        [WEB_SEARCH_TOOL, CLICK_TOOL, READ_PAGE_TOOL],
+        (chunk) => chunks.push(chunk),
+        async (name, args) => {
+          calls.push({ name, args });
+          if (name === "web_search") {
+            return "Web searched via default search engine -> https://www.google.com/search?q=cheap+flights\n[state: url=https://www.google.com/search?q=cheap+flights, title=\"cheap flights\"]";
+          }
+          if (name === "click") {
+            return "Clicked: PDX to San Francisco Flights - One-Way as Low as...\nNote: Page did not change after click. The element may need a different interaction method. Consider read_page or inspect_element.";
+          }
+          return "[read_page mode=results_only]\n\n### Likely search results\n- [#4] Alaska Airlines PDX to SFO $79\n- [#5] United PDX to SFO $83";
+        },
+        () => undefined,
+      ),
+    );
+
+    const nudgeInput = JSON.stringify(requestBodies[3]?.input ?? []);
+    assert.match(
+      nudgeInput,
+      /task is still in progress/i,
+      "harness should recover when the model asks the user to let it continue",
+    );
+    assert.equal(
+      calls.some((call) => call.name === "read_page"),
+      true,
+      "model should get another chance to continue with a browser tool",
+    );
+    assert.equal(
+      chunks.some((chunk) => chunk.includes("<<erase_prev>>")),
+      true,
+      "stalled handoff text should be erased before the recovery turn",
+    );
+  },
+);
+
+test(
+  "Codex harness nudges when the model claims it cannot reuse existing search results",
+  { timeout: 10_000 },
+  async () => {
+    const provider = new CodexProvider(codexTokens(), "gpt-5");
+    const chunks: string[] = [];
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const requestBodies: Array<Record<string, unknown>> = [];
+
+    await withMockFetch(async (_input, init) => {
+      requestBodies.push(
+        JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      );
+      const requestCount = requestBodies.length;
+
+      if (requestCount === 1) {
+        return codexSseResponse([
+          webSearchCall("call_search_1", "cheap flights Portland to San Francisco June 23"),
+        ]);
+      }
+      if (requestCount === 2) {
+        return codexSseResponse([
+          readPageCall("call_read_1"),
+        ]);
+      }
+      if (requestCount === 3) {
+        return codexSseResponse([
+          webSearchCall("call_search_2", "cheap flights Portland to San Francisco June 23"),
+        ]);
+      }
+      if (requestCount === 4) {
+        return codexSseResponse([
+          {
+            type: "response.output_text.delta",
+            delta:
+              "I'm already partway through this task and have search results available from an earlier step, but I can’t access or reuse them from the visible context you gave me here. If you send me the current results page or pricing options you see, I can tell you which is actually cheapest.",
+          },
+        ]);
+      }
+      if (requestCount === 5) {
+        return codexSseResponse([
+          readPageCall("call_read_2"),
+        ]);
+      }
+      return codexSseResponse([
+        {
+          type: "response.output_text.delta",
+          delta: "The cheapest visible option is Alaska at $79.",
+        },
+      ]);
+    }, () =>
+      provider.streamAgentQuery(
+        "system prompt",
+        "I need to book a flight from portland to SF on June 23rd - can you help me find the cheapest one?",
+        [WEB_SEARCH_TOOL, READ_PAGE_TOOL],
+        (chunk) => chunks.push(chunk),
+        async (name, args) => {
+          calls.push({ name, args });
+          if (name === "web_search") {
+            return "Web searched via default search engine -> https://www.google.com/search?q=cheap+flights\n[state: url=https://www.google.com/search?q=cheap+flights, title=\"cheap flights\"]";
+          }
+          return "[read_page mode=results_only]\n\n### Likely search results\n- [#4] Alaska Airlines PDX to SFO $79\n- [#5] United PDX to SFO $83";
+        },
+        () => undefined,
+      ),
+    );
+
+    assert.equal(
+      calls.filter((call) => call.name === "web_search").length,
+      1,
+      "duplicate web_search should be suppressed instead of executed again",
+    );
+    assert.equal(
+      chunks.some((chunk) => chunk.includes("<<tool:web_search:↻ duplicate suppressed>>")),
+      true,
+      "duplicate web_search should be visible as a suppressed tool chip",
+    );
+
+    const nudgeInput = JSON.stringify(requestBodies[4]?.input ?? []);
+    assert.match(
+      nudgeInput,
+      /task is still in progress/i,
+      "harness should recover when the model claims it cannot access prior results",
+    );
+    assert.equal(
+      calls.filter((call) => call.name === "read_page").length,
+      2,
+      "model should get another chance to continue from page results",
+    );
+  },
+);
+
+test(
+  "Codex harness escalates guidance after repeated failed flight result clicks",
+  { timeout: 10_000 },
+  async () => {
+    const provider = new CodexProvider(codexTokens(), "gpt-5");
+    const chunks: string[] = [];
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const requestBodies: Array<Record<string, unknown>> = [];
+
+    await withMockFetch(async (_input, init) => {
+      requestBodies.push(
+        JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      );
+      const requestCount = requestBodies.length;
+
+      if (requestCount === 1) {
+        return codexSseResponse([
+          webSearchCall("call_search", "cheap flights Portland to San Francisco June 23"),
+        ]);
+      }
+      if (requestCount === 2) {
+        return codexSseResponse([
+          readPageCall("call_read_1"),
+        ]);
+      }
+      if (requestCount === 3) {
+        return codexSseResponse([
+          clickCall("call_click_1", 7),
+        ]);
+      }
+      if (requestCount === 4) {
+        return codexSseResponse([
+          readPageCall("call_read_2"),
+        ]);
+      }
+      if (requestCount === 5) {
+        return codexSseResponse([
+          clickCall("call_click_2", 8),
+        ]);
+      }
+      return codexSseResponse([
+        {
+          type: "response.output_text.delta",
+          delta: "The cheapest visible option is the $74 one-way fare.",
+        },
+      ]);
+    }, () =>
+      provider.streamAgentQuery(
+        "system prompt",
+        "I need to book a flight from portland to SF on June 23rd - can you help me find the cheapest one?",
+        [WEB_SEARCH_TOOL, READ_PAGE_TOOL, CLICK_TOOL],
+        (chunk) => chunks.push(chunk),
+        async (name, args) => {
+          calls.push({ name, args });
+          if (name === "web_search") {
+            return "Web searched via default search engine -> https://www.google.com/search?q=cheap+flights\n[state: url=https://www.google.com/search?q=cheap+flights, title=\"cheap flights\"]";
+          }
+          if (name === "read_page") {
+            return "[read_page mode=results_only]\n\n### Likely search results\n- [#7] PDX to San Francisco - One-Way as Low as $74\n- [#8] PDX to San Francisco - One-Way as Low as $79";
+          }
+          const index = typeof args.index === "number" ? args.index : 0;
+          return `Clicked: PDX to San Francisco - One-Way as Low as $${index === 7 ? "74" : "79"}\nNote: Page did not change after click. The element may need a different interaction method. Consider read_page or inspect_element.`;
+        },
+        () => undefined,
+      ),
+    );
+
+    assert.equal(
+      calls.filter((call) => call.name === "click").length,
+      2,
+      "the two failed clicks should execute and return errors",
+    );
+
+    const secondRecoveryInput = JSON.stringify(requestBodies[5]?.input ?? []);
+    assert.match(
+      secondRecoveryInput,
+      /multiple failed clicks/i,
+      "second failed click should trigger stronger no-progress guidance",
+    );
+    assert.match(
+      secondRecoveryInput,
+      /Do not keep clicking similar search result titles/i,
+      "second failed click should discourage more result-title clicks",
+    );
+    assert.match(
+      secondRecoveryInput,
+      /For flight-price tasks, visible fare snippets are enough/i,
+      "flight fare result failures should steer toward comparing visible fares",
+    );
+    assert.equal(
+      chunks.some((chunk) => chunk.includes("<<tool:click:⚠ failed #7>>")),
+      true,
+      "first failed click should still be visible",
+    );
+    assert.equal(
+      chunks.some((chunk) => chunk.includes("<<tool:click:⚠ failed #8>>")),
+      true,
+      "second failed click should still be visible",
+    );
+  },
+);
+
+test(
   "Codex harness caps recovery nudges at 1 (no second nudge on persistent stall)",
   { timeout: 10_000 },
   async () => {
