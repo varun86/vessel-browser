@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { session } from "electron";
 
 import {
   assertTrustedIpcSender,
@@ -36,6 +37,10 @@ import {
   verifyActivationCode,
 } from "../src/main/premium/manager";
 import { openUpdateDownload } from "../src/main/updates/checker";
+import {
+  getPrivateWindows,
+  openPrivateWindowSafely,
+} from "../src/main/private/window";
 import { sanitizeTelemetryProperties } from "../src/main/telemetry/posthog";
 import {
   decodeEncryptionKeyFromStorage,
@@ -120,6 +125,36 @@ function codexSseResponse(
     },
   );
 }
+
+test("private window launch is contained on setup failure", () => {
+  const defaultSession = session.defaultSession as Electron.Session & {
+    getUserAgent: () => string;
+  };
+  const originalGetUserAgent = defaultSession.getUserAgent;
+  const beforeCount = getPrivateWindows().size;
+
+  defaultSession.getUserAgent = () => {
+    throw new Error("boom");
+  };
+
+  try {
+    assert.equal(openPrivateWindowSafely(), false);
+    assert.equal(
+      getPrivateWindows().size,
+      beforeCount,
+      "failed private window setup should not leave a registered private window",
+    );
+  } finally {
+    defaultSession.getUserAgent = originalGetUserAgent;
+  }
+});
+
+test("private window launch succeeds through the safe entry point", () => {
+  const beforeCount = getPrivateWindows().size;
+
+  assert.equal(openPrivateWindowSafely(), true);
+  assert.equal(getPrivateWindows().size, beforeCount + 1);
+});
 
 test("trusted IPC guard rejects unregistered renderer senders", () => {
   assert.throws(

@@ -140,8 +140,8 @@ function registerSecondaryIpcHandlers(state: SecondaryWindowState): void {
 
   ipc.handle(Channels.OPEN_NEW_WINDOW, () => createSecondaryWindow());
   ipc.handle(Channels.OPEN_PRIVATE_WINDOW, async () => {
-    const { createPrivateWindow } = await import("../private/window");
-    createPrivateWindow();
+    const { openPrivateWindowSafely } = await import("../private/window");
+    return openPrivateWindowSafely();
   });
   ipc.handle(Channels.IS_PRIVATE_MODE, () => false);
   ipc.handle(Channels.WINDOW_MINIMIZE, () => state.window.minimize());

@@ -192,7 +192,7 @@ function registerPrivateIpcHandlers(state: PrivateWindowState): void {
   ipc.handle(Channels.IS_PRIVATE_MODE, () => true);
 
   ipc.handle(Channels.OPEN_PRIVATE_WINDOW, () => {
-    createPrivateWindow();
+    return openPrivateWindowSafely();
   });
 
   ipc.handle(Channels.OPEN_NEW_WINDOW, async () => {
@@ -246,78 +246,130 @@ function registerPrivateIpcHandlers(state: PrivateWindowState): void {
 export function createPrivateWindow(): PrivateWindowState {
   const privateSessionPartition = `private-${randomUUID()}`;
   const privateSession = session.fromPartition(privateSessionPartition);
-  privateSession.setUserAgent(session.defaultSession.getUserAgent());
 
-  const win = new BaseWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    frame: false,
-    show: false,
-    backgroundColor: "#1e1a2e",
-    title: "Vessel - Private Browsing",
-  });
+  let win: BaseWindow | null = null;
+  let tabManager: TabManager | null = null;
+  let state: PrivateWindowState | null = null;
 
-  const chromeView = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, "../preload/index.js"),
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  chromeView.setBackgroundColor("#00000000");
-  win.contentView.addChildView(chromeView);
+  try {
+    privateSession.setUserAgent(session.defaultSession.getUserAgent());
 
-  const tabManager = new TabManager(
-    win,
-    (tabs, activeId) => {
-      sendSafe(chromeView.webContents, Channels.TAB_STATE_UPDATE, tabs, activeId);
-      layoutPrivateViews(state);
-    },
-    { isPrivate: true, sessionPartition: privateSessionPartition },
-  );
+    win = new BaseWindow({
+      width: 1280,
+      height: 800,
+      minWidth: 800,
+      minHeight: 600,
+      frame: false,
+      show: false,
+      backgroundColor: "#1e1a2e",
+      title: "Vessel - Private Browsing",
+    });
 
-  const state: PrivateWindowState = {
-    window: win,
-    chromeView,
-    tabManager,
-    session: privateSession,
-    sessionPartition: privateSessionPartition,
-  };
+    const chromeView = new WebContentsView({
+      webPreferences: {
+        preload: path.join(__dirname, "../preload/index.js"),
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    chromeView.setBackgroundColor("#00000000");
+    win.contentView.addChildView(chromeView);
 
-  // Install ad-blocking on the private session
-  installAdBlockingForSession(privateSession, tabManager);
-  installDownloadHandlerForSession(privateSession, chromeView);
+    tabManager = new TabManager(
+      win,
+      (tabs, activeId) => {
+        sendSafe(chromeView.webContents, Channels.TAB_STATE_UPDATE, tabs, activeId);
+        if (state) layoutPrivateViews(state);
+      },
+      { isPrivate: true, sessionPartition: privateSessionPartition },
+    );
 
-  registerPrivateIpcHandlers(state);
+    state = {
+      window: win,
+      chromeView,
+      tabManager,
+      session: privateSession,
+      sessionPartition: privateSessionPartition,
+    };
 
-  win.on("resize", () => layoutPrivateViews(state));
-  win.on("show", () => layoutPrivateViews(state));
+    // Install ad-blocking on the private session
+    installAdBlockingForSession(privateSession, tabManager);
+    installDownloadHandlerForSession(privateSession, chromeView);
 
-  win.on("closed", () => {
-    privateWindows.delete(state);
-    tabManager.destroyAllTabs();
+    registerPrivateIpcHandlers(state);
+
+    win.on("resize", () => {
+      if (state) layoutPrivateViews(state);
+    });
+    win.on("show", () => {
+      if (state) layoutPrivateViews(state);
+    });
+
+    win.on("closed", () => {
+      if (!state) return;
+      privateWindows.delete(state);
+      tabManager?.destroyAllTabs();
+      void Promise.all([
+        privateSession.clearStorageData(),
+        privateSession.clearCache(),
+      ]).catch((error) => {
+        logger.warn("Failed to clear private browsing session:", error);
+      });
+    });
+
+    privateWindows.add(state);
+
+    chromeView.webContents.once("dom-ready", () => {
+      try {
+        tabManager?.createTab("about:blank");
+        if (state) layoutPrivateViews(state);
+      } catch (error) {
+        logger.error("Failed to initialize private browsing tab:", error);
+        try {
+          win?.close();
+        } catch (cleanupError) {
+          logger.warn("Failed to close private window after tab init failure:", cleanupError);
+        }
+      }
+    });
+
+    loadPrivateRenderer(chromeView);
+    win.show();
+    logger.info("Private browsing window opened");
+    return state;
+  } catch (error) {
+    logger.error("Failed to create private browsing window:", error);
+    if (state) {
+      privateWindows.delete(state);
+    }
+    try {
+      tabManager?.destroyAllTabs();
+    } catch (cleanupError) {
+      logger.warn("Failed to clean up private tabs after launch failure:", cleanupError);
+    }
+    try {
+      win?.close();
+    } catch (cleanupError) {
+      logger.warn("Failed to close private window after launch failure:", cleanupError);
+    }
     void Promise.all([
       privateSession.clearStorageData(),
       privateSession.clearCache(),
-    ]).catch((error) => {
-      logger.warn("Failed to clear private browsing session:", error);
+    ]).catch((cleanupError) => {
+      logger.warn("Failed to clear failed private browsing session:", cleanupError);
     });
-  });
+    throw error;
+  }
+}
 
-  privateWindows.add(state);
-
-  chromeView.webContents.once("dom-ready", () => {
-    tabManager.createTab("about:blank");
-    layoutPrivateViews(state);
-  });
-
-  loadPrivateRenderer(chromeView);
-  win.show();
-  logger.info("Private browsing window opened");
-  return state;
+export function openPrivateWindowSafely(): boolean {
+  try {
+    createPrivateWindow();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function getPrivateWindows(): ReadonlySet<PrivateWindowState> {

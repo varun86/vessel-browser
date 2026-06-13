@@ -10,7 +10,7 @@ import {
 } from "./common";
 import { createFindInPageBridge } from "../tabs/find-bridge";
 import { showTabContextMenu, showGroupContextMenu } from "../tabs/tab-context-menu";
-import { createPrivateWindow } from "../private/window";
+import { openPrivateWindowSafely } from "../private/window";
 import { createSecondaryWindow } from "../secondary/window";
 
 const TabIdSchema = z.string().min(1);
@@ -27,7 +27,7 @@ export function registerTabHandlers(
 
   ipcMain.handle(Channels.OPEN_PRIVATE_WINDOW, (event) => {
     assertTrustedIpcSender(event);
-    createPrivateWindow();
+    return openPrivateWindowSafely();
   });
 
   ipcMain.handle(Channels.OPEN_NEW_WINDOW, (event) => {
