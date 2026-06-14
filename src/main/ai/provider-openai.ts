@@ -15,12 +15,14 @@ import { LLAMA_CPP_MIN_CTX_TOKENS, LLAMA_CPP_RECOMMENDED_CTX_TOKENS } from './co
 import { createLogger } from '../../shared/logger';
 import { TERMINAL_TOOL_RESULT } from './tool-control';
 import {
+  buildHighlightToolCompletionPrompt,
   coerceToolArgsForExecution,
   isTargetlessClickArgs,
   parseToolArgsWithRepair,
   recoverNarratedActionToolCalls,
   recoverTextEncodedToolCalls,
   resolveToolCallName,
+  shouldRetryUnexecutedHighlightCompletion,
   stableToolSignature,
   unsupportedToolHint,
 } from './provider-openai-tools';
@@ -102,6 +104,27 @@ function toOpenAIReasoningEffort(
     default:
       return undefined;
   }
+}
+
+function openRouterRoutingOptions(
+  providerId: ProviderId,
+): Record<string, unknown> {
+  if (providerId !== 'openrouter') return {};
+
+  return {
+    provider: {
+      require_parameters: true,
+      sort: 'latency',
+    },
+  };
+}
+
+export function buildOpenRouterAttributionHeaders(): Record<string, string> {
+  return {
+    'HTTP-Referer': 'https://github.com/unmodeled-tyler/vessel-browser',
+    'X-OpenRouter-Title': 'Vessel Browser',
+    'X-OpenRouter-Categories': 'personal-agent,general-chat',
+  };
 }
 
 function followUpReminderForProfile(
@@ -360,6 +383,59 @@ export function buildLatestStateReminder(toolResultPreview: string): string {
   return '';
 }
 
+function normalizedSearchToolQuery(
+  name: string,
+  args: Record<string, unknown>,
+): string | null {
+  if (name !== 'search' && name !== 'web_search') return null;
+  const raw =
+    typeof args.query === 'string'
+      ? args.query
+      : typeof args.text === 'string'
+        ? args.text
+        : typeof args.term === 'string'
+          ? args.term
+          : '';
+  const normalized = raw.replace(/\s+/g, ' ').trim().toLowerCase();
+  return normalized || null;
+}
+
+export function isOpenAIRealProgressToolForSearch(name: string): boolean {
+  return ![
+    'read_page',
+    'current_tab',
+    'list_tabs',
+    'screenshot',
+    'clear_overlays',
+    'accept_cookies',
+    'dismiss_popup',
+    'web_search',
+    'search',
+  ].includes(name);
+}
+
+export function buildOpenAIRepeatedSearchError(
+  previousTool: string,
+  previousQuery: string,
+  latestToolResultPreview: string | null,
+  mode: 'repeated' | 'drifted',
+): string {
+  const stateReminder = buildLatestStateReminder(latestToolResultPreview || '');
+  const lines = [
+    mode === 'drifted'
+      ? `Error: You already performed ${previousTool} successfully for this task.`
+      : `Error: You already searched for "${previousQuery}" successfully with ${previousTool}.`,
+    mode === 'drifted'
+      ? `Do not rewrite or broaden the query with another ${previousTool}; use the current search results instead.`
+      : `Do not search the same query again with ${previousTool} or its search/web_search alias; use the current search results instead.`,
+    `For named venues, businesses, organizations, schools, or local places, prefer opening the official site or clearly direct result from the current results page before answering. Do not switch to a site: restricted web_search when an official or direct result is already available. Next action: click a result, inspect a specific result, or answer from the result you already opened. Do not call any search tool again as preparation.`,
+  ];
+  if (stateReminder) {
+    lines.push(stateReminder);
+  }
+  return lines.join(' ');
+}
+
 function shouldRecoverCompactStall(
   text: string,
   userMessage?: string,
@@ -469,6 +545,19 @@ export function formatOpenAICompatErrorMessage(
   message: string,
 ): string {
   if (
+    providerId === 'openrouter' &&
+    /(timed out after \d+(?:\.\d+)? seconds|request timed out|returned none after all retries|no content|empty response)/i.test(
+      message,
+    )
+  ) {
+    return (
+      `${message} ` +
+      `OpenRouter reported an upstream model timeout/no-content failure. ` +
+      `If this persists, retry or pin a specific low-latency tool-calling model instead of the free router.`
+    );
+  }
+
+  if (
     providerId === 'llama_cpp' &&
     /(available context size|context size exceeded|exceeds the available context size|try increasing it)/i.test(
       message,
@@ -504,10 +593,7 @@ export class OpenAICompatProvider implements AIProvider {
       apiKey: config.apiKey || 'ollama',
       baseURL,
       ...(isOpenRouter && {
-        defaultHeaders: {
-          'HTTP-Referer': 'https://github.com/unmodeled/vessel-browser',
-          'X-Title': 'Vessel',
-        },
+        defaultHeaders: buildOpenRouterAttributionHeaders(),
       }),
     });
     this.providerId = config.id;
@@ -543,6 +629,7 @@ export class OpenAICompatProvider implements AIProvider {
           max_tokens: 4096,
           stream: true,
           messages,
+          ...openRouterRoutingOptions(this.providerId),
           ...openAIPromptCacheOptions({
             providerId: this.providerId,
             model: this.model,
@@ -616,9 +703,14 @@ export class OpenAICompatProvider implements AIProvider {
       let iterationsUsed = 0;
       let compactRecoveryCount = 0;
       let flightPriceEvidenceRecoveryCount = 0;
+      let highlightCompletionRecoveryCount = 0;
       let compactCorrectionCount = 0;
       const recentCompactToolSignatures: string[] = [];
       const recentToolNames: string[] = [];
+      const successfulToolNames: string[] = [];
+      const recentSuccessfulSearchQueries: string[] = [];
+      const recentSuccessfulSearchToolByQuery = new Map<string, string>();
+      let lastSuccessfulWebSearchQuery: string | null = null;
       let clickReadLoopNudged = false;
       for (let i = 0; i < maxIterations; i++) {
         iterationsUsed = i + 1;
@@ -645,6 +737,7 @@ export class OpenAICompatProvider implements AIProvider {
             tools: openAITools,
             tool_choice: 'auto',
             temperature: agentTemperatureForProfile(this.agentToolProfile),
+            ...openRouterRoutingOptions(this.providerId),
             ...openAIPromptCacheOptions({
               providerId: this.providerId,
               model: this.model,
@@ -832,6 +925,22 @@ export class OpenAICompatProvider implements AIProvider {
             });
             continue;
           }
+          if (
+            highlightCompletionRecoveryCount < 1 &&
+            shouldRetryUnexecutedHighlightCompletion(
+              userMessage,
+              textAccum,
+              successfulToolNames,
+            )
+          ) {
+            highlightCompletionRecoveryCount += 1;
+            if (textAccum.trim()) onChunk('<<erase_prev>>');
+            messages.push({
+              role: 'user',
+              content: `[System] ${buildHighlightToolCompletionPrompt()}`,
+            });
+            continue;
+          }
           break;
         }
         compactRecoveryCount = 0;
@@ -888,6 +997,42 @@ export class OpenAICompatProvider implements AIProvider {
           args = coerceToolArgsForExecution(tc.name, args);
 
           const toolSignature = stableToolSignature(tc.name, args);
+          const searchToolQuery = normalizedSearchToolQuery(tc.name, args);
+          const isRepeatedSearchAcrossTools =
+            searchToolQuery !== null &&
+            recentSuccessfulSearchQueries.includes(searchToolQuery);
+          const isQueryDriftedWebSearch =
+            tc.name === 'web_search' &&
+            lastSuccessfulWebSearchQuery !== null &&
+            searchToolQuery !== null &&
+            searchToolQuery !== lastSuccessfulWebSearchQuery;
+          if (isRepeatedSearchAcrossTools || isQueryDriftedWebSearch) {
+            onChunk(`\n<<tool:${tc.name}:↻ duplicate suppressed>>\n`);
+            const previousTool = isRepeatedSearchAcrossTools
+              ? (recentSuccessfulSearchToolByQuery.get(searchToolQuery ?? '') ??
+                (tc.name === 'web_search' ? 'search' : 'web_search'))
+              : 'web_search';
+            const previousQuery = isRepeatedSearchAcrossTools
+              ? (searchToolQuery ?? '')
+              : (lastSuccessfulWebSearchQuery ?? '');
+            const mode: 'repeated' | 'drifted' = isRepeatedSearchAcrossTools
+              ? 'repeated'
+              : 'drifted';
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: buildOpenAIRepeatedSearchError(
+                previousTool,
+                previousQuery,
+                latestToolMessage
+                  ? String(latestToolMessage.content || '')
+                  : null,
+                mode,
+              ),
+            });
+            compactCorrectionCount += 1;
+            continue;
+          }
           if (
             this.agentToolProfile === 'compact' &&
             tc.name === 'click' &&
@@ -978,6 +1123,28 @@ export class OpenAICompatProvider implements AIProvider {
             recentCompactToolSignatures.push(toolSignature);
             if (recentCompactToolSignatures.length > 4) {
               recentCompactToolSignatures.shift();
+            }
+          }
+          if (!/^Error:/i.test(toolContent.trim())) {
+            successfulToolNames.push(tc.name);
+            if (isOpenAIRealProgressToolForSearch(tc.name)) {
+              lastSuccessfulWebSearchQuery = null;
+            }
+            if (
+              searchToolQuery &&
+              !recentSuccessfulSearchQueries.includes(searchToolQuery)
+            ) {
+              recentSuccessfulSearchQueries.push(searchToolQuery);
+              recentSuccessfulSearchToolByQuery.set(searchToolQuery, tc.name);
+              if (recentSuccessfulSearchQueries.length > 4) {
+                const dropped = recentSuccessfulSearchQueries.shift();
+                if (dropped) {
+                  recentSuccessfulSearchToolByQuery.delete(dropped);
+                }
+              }
+            }
+            if (tc.name === 'web_search' && searchToolQuery) {
+              lastSuccessfulWebSearchQuery = searchToolQuery;
             }
           }
 

@@ -170,6 +170,34 @@ test("flight price claims require visible price evidence", () => {
     false,
     "price claims should pass when the latest page evidence includes priced flight rows",
   );
+
+  assert.equal(
+    shouldBlockUnsupportedFlightPriceAnswer(
+      userMessage,
+      "The cheapest visible option is United nonstop at $1,234.",
+      [
+        "**URL:** https://www.google.com/travel/flights",
+        "Best departing flights",
+        "United PDX to SFO nonstop duration 1 hr 42 min $1,234",
+      ].join("\n"),
+    ),
+    false,
+    "comma-formatted flight prices should count as visible price evidence",
+  );
+
+  assert.equal(
+    shouldBlockUnsupportedFlightPriceAnswer(
+      userMessage,
+      "The cheapest PDX to SFO flight is United nonstop at $1,234.",
+      [
+        "**URL:** https://www.google.com/travel/flights",
+        "Where to? Search airports or cities",
+        "Departure date",
+      ].join("\n"),
+    ),
+    true,
+    "comma-formatted flight price claims should still be blocked without visible price evidence",
+  );
 });
 
 test(

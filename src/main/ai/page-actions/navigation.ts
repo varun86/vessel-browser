@@ -629,7 +629,7 @@ export async function locateImplicitTextTarget(
           const role = normalize(el.getAttribute("role"));
           if (
             el.isContentEditable ||
-            el.getAttribute("contenteditable") === "true" ||
+            (el.hasAttribute("contenteditable") && el.getAttribute("contenteditable") !== "false") ||
             role === "textbox" ||
             role === "searchbox" ||
             role === "combobox"
@@ -653,7 +653,7 @@ export async function locateImplicitTextTarget(
         }
 
         const candidates = Array.from(
-          document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]), textarea, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]')
+          document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]), textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="searchbox"], [role="combobox"]')
         ).filter((el) => isFillable(el) && isVisible(el));
 
         let best = null;

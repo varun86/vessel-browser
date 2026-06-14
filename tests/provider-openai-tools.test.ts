@@ -2,14 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildHighlightToolCompletionPrompt,
   coerceToolArgsForExecution,
   isTargetlessClickArgs,
   parseToolArgsWithRepair,
   recoverNarratedActionToolCalls,
   recoverTextEncodedToolCalls,
   resolveToolCallName,
+  shouldRetryUnexecutedHighlightCompletion,
   stableToolSignature,
 } from "../src/main/ai/provider-openai-tools";
+import { AGENT_TOOLS } from "../src/main/ai/tools";
 import { hasRecentDuplicateToolCall } from "../src/main/ai/tool-guardrails";
 
 test("duplicate tool signatures compare equal regardless of arg key order", () => {
@@ -225,4 +228,58 @@ Action: Navigate to https://www.powells.com/.`,
   assert.equal(read.length, 1);
   assert.equal(read[0]?.name, "read_page");
   assert.equal(read[0]?.argsJson, '{"mode":"visible_only"}');
+});
+
+test("detects highlight completion claims without a successful highlight tool", () => {
+  assert.equal(
+    shouldRetryUnexecutedHighlightCompletion(
+      "Take me to Hacker News and highlight the most important stories",
+      `Top Stories Highlighted:
+
+"MAI-Code-1-Flash" - Green highlight
+"HP re-releases classic computer science calculator" - Green highlight`,
+      ["navigate", "read_page"],
+    ),
+    true,
+  );
+
+  assert.equal(
+    shouldRetryUnexecutedHighlightCompletion(
+      "Take me to Hacker News and highlight the most important stories",
+      "I found several important stories and can highlight them next.",
+      ["navigate", "read_page"],
+    ),
+    false,
+  );
+
+  assert.equal(
+    shouldRetryUnexecutedHighlightCompletion(
+      "Take me to Hacker News and highlight the most important stories",
+      "I highlighted the most important stories.",
+      ["navigate", "read_page", "highlight"],
+    ),
+    false,
+  );
+
+  assert.match(
+    buildHighlightToolCompletionPrompt(),
+    /"text":"exact visible title or passage"/,
+  );
+});
+
+test("highlight tool schema prefers exact visible text over indexes", () => {
+  const highlight = AGENT_TOOLS.find((tool) => tool.name === "highlight");
+  assert.ok(highlight);
+  assert.match(highlight.description ?? "", /prefer text with the exact visible title\/text/i);
+
+  const properties = highlight.input_schema.properties as Record<string, unknown>;
+  assert.deepEqual(Object.keys(properties).slice(0, 3), [
+    "text",
+    "index",
+    "selector",
+  ]);
+  assert.match(
+    JSON.stringify(properties.text),
+    /Preferred for story titles, result titles, links, headings, and passages/,
+  );
 });

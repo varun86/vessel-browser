@@ -1,4 +1,4 @@
-const DOLLAR_PRICE_RE = /\$\s?\d{2,4}(?:[,.]\d{2})?\b/;
+const DOLLAR_PRICE_RE = /\$\s?(?:\d{2,4}|\d{1,3}(?:,\d{3})+)(?:\.\d{2})?\b/;
 
 const FLIGHT_TASK_RE =
   /\b(?:flight|flights|airfare|air fare|plane ticket|airline|airport|google flights|pdx|sfo|san francisco|portland)\b/i;

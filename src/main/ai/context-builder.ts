@@ -419,6 +419,46 @@ function purchaseActionPriority(el: InteractiveElement): number {
   return Number.POSITIVE_INFINITY;
 }
 
+function dateOrShowtimeControlPriority(el: InteractiveElement): number {
+  const haystack = normalizeComparable(
+    [
+      el.text,
+      el.label,
+      el.name,
+      el.placeholder,
+      el.description,
+      el.href,
+      el.role,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+
+  if (!haystack) return Number.POSITIVE_INFINITY;
+  if (
+    /\b(today|tomorrow|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/.test(
+      haystack,
+    )
+  ) {
+    return 0;
+  }
+  if (
+    /\b(showtimes?|showings?|screenings?|movie times?|date|calendar)\b/.test(
+      haystack,
+    )
+  ) {
+    return 1;
+  }
+  if (/\b(ticketing|tickets?|formovietickets|seat selection)\b/.test(haystack)) {
+    return 2;
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+function isDateOrShowtimeControl(el: InteractiveElement): boolean {
+  return Number.isFinite(dateOrShowtimeControlPriority(el));
+}
+
 function isPurchaseActionElement(el: InteractiveElement): boolean {
   if (
     el.type !== "button" &&
@@ -560,6 +600,10 @@ function formatInteractiveElements(elements: InteractiveElement[]): string {
       if (Number.isFinite(purchasePriority)) {
         s -= 25 - purchasePriority * 5;
       }
+      const datePriority = dateOrShowtimeControlPriority(el);
+      if (Number.isFinite(datePriority)) {
+        s -= 18 - datePriority * 4;
+      }
       if (el.visible === false) s += 100;
       if (el.inViewport === false) s += 50;
       if (
@@ -604,9 +648,10 @@ function formatInteractiveElements(elements: InteractiveElement[]): string {
         if (summary) parts.push(`${summary.label}="${summary.value}"`);
         appendFieldAffordances(parts, el);
         if (el.options?.length) {
+          const maxOptions = isDateOrShowtimeControl(el) ? 10 : 5;
           parts.push(
             `options=${el.options
-              .slice(0, 5)
+              .slice(0, maxOptions)
               .map((o) => (typeof o === "string" ? o : o.label || o.value))
               .join("|")}`,
           );
@@ -698,9 +743,10 @@ function formatForms(forms: PageContent["forms"]): string {
             if (summary) fieldParts.push(`${summary.label}="${summary.value}"`);
             appendFieldAffordances(fieldParts, field);
             if (field.options?.length) {
+              const maxOptions = isDateOrShowtimeControl(field) ? 10 : 5;
               fieldParts.push(
                 `options=${field.options
-                  .slice(0, 5)
+                  .slice(0, maxOptions)
                   .map((o) => (typeof o === "string" ? o : o.label || o.value))
                   .join("|")}`,
               );
@@ -1094,6 +1140,8 @@ export function chooseAgentReadMode(page: PageContent): ExtractMode {
 }
 
 function isSearchOrListingPage(page: PageContent): boolean {
+  if (isHackerNewsListingPage(page.url)) return true;
+
   const haystack = normalizeComparable(
     [
       page.url,
@@ -1108,6 +1156,57 @@ function isSearchOrListingPage(page: PageContent): boolean {
   return /\b(search|results|find|discover|browse|repositories|repository|issues|pull requests|prs|users|events|listings)\b/.test(
     haystack,
   );
+}
+
+function isHackerNewsListingPage(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "news.ycombinator.com") return false;
+    const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+    return [
+      "/",
+      "/news",
+      "/newest",
+      "/front",
+      "/ask",
+      "/show",
+      "/jobs",
+      "/best",
+      "/active",
+      "/classic",
+      "/noobstories",
+    ].includes(pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isHackerNewsUtilityLink(element: InteractiveElement): boolean {
+  if (!element.href) return false;
+
+  let url: URL;
+  try {
+    url = new URL(element.href);
+  } catch {
+    return false;
+  }
+  if (url.hostname !== "news.ycombinator.com") return false;
+
+  const text = normalizeComparable(element.text || "");
+  const pathname = url.pathname.replace(/\/+$/, "") || "/";
+
+  if (
+    /^(hide|past|favorite|unfavorite|flag|unflag|discuss|reply|parent|more)$/.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+
+  if (/^\d+\s+(?:comments?|points?)$/.test(text)) return true;
+  if (pathname === "/hide" || pathname === "/user") return true;
+
+  return pathname === "/item" && /^(?:discuss|\d+\s+comments?)$/.test(text);
 }
 
 function collectJsonLdEntityItems(
@@ -1170,7 +1269,10 @@ function getResultCandidates(page: PageContent): InteractiveElement[] {
   const scored = page.interactiveElements
     .filter(
       (element) =>
-        element.type === "link" && element.text?.trim() && element.href,
+        element.type === "link" &&
+        element.text?.trim() &&
+        element.href &&
+        !isHackerNewsUtilityLink(element),
     )
     .map((element) => {
       const text = element.text?.trim() || "";
@@ -1749,6 +1851,7 @@ export function detectPageType(page: PageContent): PageType {
   if (hasResults && hasSearchInput && listingLike) return "SEARCH_RESULTS";
   if (hasCart) return "SHOPPING";
   if (formCount > 0 && !hasPasswordField) return "FORM";
+  if (isHackerNewsListingPage(page.url)) return "PAGINATED_LIST";
   if (hasPagination && listingLike) return "PAGINATED_LIST";
   if (hasSearchInput && !listingLike) return "SEARCH_READY";
   if (page.content.length > 3000 && page.interactiveElements.length < 10)

@@ -54,8 +54,24 @@ const UNSORTED_FOLDER: BookmarkFolder = {
 
 const MarkdownMessage = (props: { content: string }) => {
   const html = createMemo(() => renderMarkdown(props.content));
+  const handleClick = (event: MouseEvent) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const summary = target.closest(".tool-chip-summary");
+    if (!(summary instanceof HTMLElement)) return;
+    const group = summary.closest(".tool-chip-group");
+    if (!(group instanceof HTMLElement)) return;
+    const expanded = !group.classList.contains("expanded");
+    group.classList.toggle("expanded", expanded);
+  };
 
-  return <div class="message-content markdown-content" innerHTML={html()} />;
+  return (
+    <div
+      class="message-content markdown-content"
+      innerHTML={html()}
+      onClick={handleClick}
+    />
+  );
 };
 
 type PremiumPromptKind = "premium_gate" | "iteration_limit";
@@ -2261,7 +2277,7 @@ const Sidebar: Component<{ forceOpen?: boolean }> = (props) => {
                       </Show>
                       <div class="streaming-status">
                         <span class="streaming-pulse" aria-hidden="true" />
-                        <span>Generating</span>
+                        <span>Thinking</span>
                         <Show when={elapsedSeconds() > 0}>
                           <span>{` • ${elapsedSeconds()}s`}</span>
                         </Show>

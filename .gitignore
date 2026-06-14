@@ -71,6 +71,7 @@ tests/*.test.ts
 !tests/channel-contract.test.ts
 !tests/dom-selectors.test.ts
 !tests/fillable-controls.test.ts
+!tests/highlight-actions.test.ts
 !tests/input-coercion.test.ts
 !tests/link-validation.test.ts
 !tests/overlay-context.test.ts

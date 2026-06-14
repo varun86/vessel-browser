@@ -6,6 +6,8 @@ let wcId = 0;
 function createMockWebContents() {
   wcId += 1;
   let zoom = 0;
+  const ipcHandlers = new Map();
+  const ipcListeners = new Map();
   return {
     id: wcId,
     isDestroyed: () => false,
@@ -16,6 +18,7 @@ function createMockWebContents() {
       setCertificateVerifyProc: () => {},
     },
     loadURL: () => {},
+    loadFile: () => {},
     reload: () => {},
     getZoomLevel: () => zoom,
     setZoomLevel: (v) => { zoom = v; },
@@ -25,7 +28,9 @@ function createMockWebContents() {
     executeJavaScript: () => Promise.resolve({}),
     setWindowOpenHandler: () => {},
     on: () => {},
-    once: () => {},
+    once: (_event, listener) => {
+      if (typeof listener === "function") listener();
+    },
     removeListener: () => {},
     close: () => {},
     copy: () => {},
@@ -33,6 +38,16 @@ function createMockWebContents() {
     cut: () => {},
     selectAll: () => {},
     send: () => {},
+    ipc: {
+      handle: (channel, listener) => {
+        ipcHandlers.set(channel, listener);
+      },
+      on: (channel, listener) => {
+        ipcListeners.set(channel, listener);
+      },
+      _handlers: ipcHandlers,
+      _listeners: ipcListeners,
+    },
   };
 }
 
@@ -43,11 +58,29 @@ function WebContentsView(opts) {
     this.webContents.session = session;
   }
   this.setBounds = () => {};
+  this.setBackgroundColor = () => {};
 }
+
+function createMockSession() {
+  return {
+    setUserAgent: () => {},
+    getUserAgent: () => "Vessel Test",
+    setCertificateVerifyProc: () => {},
+    webRequest: { onBeforeRequest: () => {} },
+    on: () => {},
+    clearStorageData: () => Promise.resolve(),
+    clearCache: () => Promise.resolve(),
+  };
+}
+
+const defaultSession = createMockSession();
+const ipcMainHandlers = new Map();
+const ipcMainListeners = new Map();
 
 module.exports = {
   app: {
     getPath: (name) => path.join(os.tmpdir(), `vessel-test-${name}`),
+    getAppPath: () => process.cwd(),
   },
   safeStorage: {
     isEncryptionAvailable: () => true,
@@ -57,14 +90,41 @@ module.exports = {
   BaseWindow: class BaseWindow {
     constructor() {
       this.contentView = { addChildView: () => {}, removeChildView: () => {} };
+      this._listeners = new Map();
     }
+    getContentSize() { return [1280, 800]; }
+    on(event, listener) { this._listeners.set(event, listener); }
+    show() { this._listeners.get("show")?.(); }
+    close() { this._listeners.get("closed")?.(); }
+    minimize() {}
+    maximize() {}
+    unmaximize() {}
+    isMaximized() { return false; }
   },
   WebContentsView,
   clipboard: { writeText: () => {} },
   Menu: { buildFromTemplate: () => ({ popup: () => {} }) },
   MenuItem: class MenuItem {},
+  ipcMain: {
+    handle: (channel, listener) => {
+      ipcMainHandlers.set(channel, listener);
+    },
+    on: (channel, listener) => {
+      ipcMainListeners.set(channel, listener);
+    },
+    removeHandler: (channel) => {
+      ipcMainHandlers.delete(channel);
+    },
+    removeListener: (channel, listener) => {
+      if (ipcMainListeners.get(channel) === listener) {
+        ipcMainListeners.delete(channel);
+      }
+    },
+    _handlers: ipcMainHandlers,
+    _listeners: ipcMainListeners,
+  },
   session: {
-    fromPartition: () => ({ setCertificateVerifyProc: () => {} }),
-    defaultSession: { webRequest: { onBeforeRequest: () => {} } },
+    fromPartition: () => createMockSession(),
+    defaultSession,
   },
 };

@@ -312,9 +312,21 @@ const TOOL_ICONS: Record<string, string> = {
   restore_checkpoint: "⟲",
 };
 
+interface ToolChipRender {
+  index: number;
+  name: string;
+  args: string;
+  html: string;
+  failed: boolean;
+}
+
+function formatToolName(name: string): string {
+  return name.replace(/_/g, " ");
+}
+
 function renderToolChip(name: string, args: string): string {
   const icon = TOOL_ICONS[name] || "⚙";
-  const displayName = name.replace(/_/g, " ");
+  const displayName = formatToolName(name);
   const failed = args.trim().startsWith("⚠");
   const argsHtml = args
     ? `<span class="tool-chip-args">${escapeHtml(args.length > MAX_PREVIEW_TEXT ? args.slice(0, TRUNCATE_KEEP) + "..." : args)}</span>`
@@ -322,9 +334,66 @@ function renderToolChip(name: string, args: string): string {
   return `<div class="tool-chip${failed ? " tool-chip-failed" : ""}"><span class="tool-chip-icon">${icon}</span><span class="tool-chip-name">${escapeHtml(displayName)}</span>${argsHtml}</div>`;
 }
 
+function renderToolChipGroup(chips: ToolChipRender[]): string {
+  if (chips.length === 1) return chips[0].html;
+
+  const first = chips[0];
+  const icon = TOOL_ICONS[first.name] || "⚙";
+  const failed = chips.some((chip) => chip.failed);
+  const latestArgs = [...chips].reverse().find((chip) => chip.args)?.args ?? "";
+  const argsHtml = latestArgs
+    ? `<span class="tool-chip-args">${escapeHtml(latestArgs.length > MAX_PREVIEW_TEXT ? latestArgs.slice(0, TRUNCATE_KEEP) + "..." : latestArgs)}</span>`
+    : "";
+
+  return [
+    `<div class="tool-chip-group${failed ? " tool-chip-group-failed" : ""}">`,
+    `<div class="tool-chip tool-chip-summary${failed ? " tool-chip-failed" : ""}">`,
+    `<span class="tool-chip-icon">${icon}</span>`,
+    `<span class="tool-chip-name">${escapeHtml(formatToolName(first.name))}</span>`,
+    `<span class="tool-chip-count">${chips.length} calls</span>`,
+    argsHtml,
+    `</div>`,
+    `<div class="tool-chip-group-items">`,
+    chips.map((chip) => chip.html).join(""),
+    `</div>`,
+    `</div>`,
+  ].join("");
+}
+
+function collapseAdjacentToolTokens(
+  html: string,
+  toolChips: ToolChipRender[],
+): string {
+  return html.replace(/(?:\x00TC\d+\x00){2,}/g, (sequence) => {
+    const indices = Array.from(sequence.matchAll(/\x00TC(\d+)\x00/g), (match) =>
+      Number(match[1]),
+    );
+    const groups: ToolChipRender[][] = [];
+
+    for (const index of indices) {
+      const chip = toolChips[index];
+      if (!chip) continue;
+      const current = groups[groups.length - 1];
+      if (current && current[0]?.name === chip.name) {
+        current.push(chip);
+      } else {
+        groups.push([chip]);
+      }
+    }
+
+    return groups
+      .map((group) =>
+        group.length > 1
+          ? renderToolChipGroup(group)
+          : `\x00TC${toolChips.indexOf(group[0])}\x00`,
+      )
+      .join("");
+  });
+}
+
 export function renderMarkdown(source: string): string {
   const codeBlocks: string[] = [];
-  const toolChips: string[] = [];
+  const toolChips: ToolChipRender[] = [];
 
   const normalized = source
     .replace(/\r\n?/g, "\n")
@@ -336,7 +405,15 @@ export function renderMarkdown(source: string): string {
       /<<tool:([^:>\n]+)(?::([^>\n]*))?>>/g,
       (_, name: string, args: string | undefined) => {
         const token = `\x00TC${toolChips.length}\x00`;
-        toolChips.push(renderToolChip(name.trim(), (args || "").trim()));
+        const normalizedName = name.trim();
+        const normalizedArgs = (args || "").trim();
+        toolChips.push({
+          index: toolChips.length,
+          name: normalizedName,
+          args: normalizedArgs,
+          html: renderToolChip(normalizedName, normalizedArgs),
+          failed: normalizedArgs.startsWith("⚠"),
+        });
         return `\n\n${token}\n\n`;
       },
     )
@@ -377,13 +454,13 @@ export function renderMarkdown(source: string): string {
   // Clean up any remaining stray erase markers
   const cleaned = erased.replace(/\x00ERASE\x00/g, "");
 
-  let output = cleaned;
+  let output = collapseAdjacentToolTokens(cleaned, toolChips);
   output = codeBlocks.reduce(
     (out, snippet, index) => out.replace(`\x00CB${index}\x00`, snippet),
     output,
   );
   output = toolChips.reduce(
-    (out, snippet, index) => out.replace(`\x00TC${index}\x00`, snippet),
+    (out, snippet, index) => out.replace(`\x00TC${index}\x00`, snippet.html),
     output,
   );
 
@@ -423,6 +500,13 @@ export function renderMarkdown(source: string): string {
       "tr",
       "ul",
     ],
-    ALLOWED_ATTR: ["href", "target", "rel", "data-language", "style", "class"],
+    ALLOWED_ATTR: [
+      "href",
+      "target",
+      "rel",
+      "data-language",
+      "style",
+      "class",
+    ],
   });
 }
