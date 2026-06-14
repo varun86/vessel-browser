@@ -84,6 +84,23 @@ const PAGE_DIFF_ACTIVITY_THROTTLE_MS = 350;
 const PAGE_DIFF_MUTATION_DEBOUNCE_MS = 1200;
 const CUSTOM_TEXT_FIELD_SELECTOR =
   '[contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="searchbox"], [role="combobox"]';
+const ACTION_CONTROL_SELECTOR = [
+  "button",
+  '[role="button"]',
+  '[role="tab"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  '[role="radio"]',
+  '[role="checkbox"]',
+  '[role="switch"]',
+  'input[type="submit"]',
+  'input[type="button"]',
+  'a[href^="#"][aria-selected]',
+  'a[href^="#"][data-date]',
+  'a[href^="#"][data-day]',
+  'a[href^="#"][role="tab"]',
+  'a[href^="#"][role="button"]',
+].join(", ");
 
 function normalizeSignatureText(value: string | null | undefined): string {
   return (value || "").replace(/\s+/g, " ").trim();
@@ -1442,6 +1459,43 @@ function buildBaseMetadata(
   };
 }
 
+function isNavigableEmbeddedSrc(src: string): boolean {
+  const normalized = src.trim().toLowerCase();
+  return (
+    Boolean(normalized) && !/^(about:blank|javascript:|data:)/.test(normalized)
+  );
+}
+
+function getEmbeddedFrameLabel(iframe: HTMLIFrameElement): string {
+  const explicitLabel =
+    getTrimmedText(iframe.getAttribute("title")) ||
+    getTrimmedText(iframe.getAttribute("aria-label")) ||
+    getTrimmedText(iframe.name) ||
+    getTrimmedText(iframe.id);
+
+  if (explicitLabel) {
+    return explicitLabel.slice(0, MAX_LABEL_LENGTH);
+  }
+
+  let host = "embedded page";
+  try {
+    host = new URL(iframe.src, window.location.href).hostname.replace(
+      /^www\./,
+      "",
+    );
+  } catch {
+    // Keep the generic fallback for malformed iframe URLs.
+  }
+
+  const srcText = iframe.src.toLowerCase();
+  const prefix = /\b(ticket|showtime|movie|cinema|theat(?:er|re))\b/.test(
+    srcText,
+  )
+    ? "Embedded ticketing page"
+    : "Embedded page";
+  return `${prefix}: ${host}`.slice(0, MAX_LABEL_LENGTH);
+}
+
 function extractHeadings(): HeadingStructure[] {
   return deepQuerySelectorAll("h1, h2, h3, h4, h5, h6")
     .map((el) => {
@@ -1517,9 +1571,7 @@ function getFieldMetadata(
 function extractInteractiveElements(): InteractiveElement[] {
   const elements: InteractiveElement[] = [];
 
-  deepQuerySelectorAll(
-    'button, [role="button"], input[type="submit"], input[type="button"]',
-  ).forEach((btn) => {
+  deepQuerySelectorAll(ACTION_CONTROL_SELECTOR).forEach((btn) => {
     const { text, source } = getButtonTextWithSource(btn);
     const role = getElementRole(btn);
 
@@ -1546,6 +1598,19 @@ function extractInteractiveElements(): InteractiveElement[] {
       href: anchor.href.slice(0, MAX_HREF_LENGTH),
       ...buildBaseMetadata(anchor),
       context,
+    });
+  });
+
+  deepQuerySelectorAll("iframe[src]").forEach((frame) => {
+    const iframe = frame as HTMLIFrameElement;
+    if (!isNavigableEmbeddedSrc(iframe.src)) return;
+
+    elements.push({
+      type: "link",
+      text: getEmbeddedFrameLabel(iframe),
+      href: iframe.src.slice(0, MAX_HREF_LENGTH),
+      ...buildBaseMetadata(iframe),
+      context: getElementContext(iframe),
     });
   });
 

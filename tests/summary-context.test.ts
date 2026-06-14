@@ -509,6 +509,87 @@ test("agent prompt steers named venue questions toward official sites", () => {
   assert.match(prompt, /site-specific search only after opening the direct source fails/i);
 });
 
+test("visible_only keeps showtime date controls and embedded ticketing visible", () => {
+  const genericLinks = Array.from({ length: 60 }, (_, i) => ({
+    type: "link" as const,
+    text: `Generic page link ${i + 1}`,
+    href: `https://morelandtheater.com/page-${i + 1}`,
+    context: "content",
+    index: i + 1,
+    visible: true,
+    inViewport: true,
+    fullyInViewport: true,
+  }));
+
+  const context = buildScopedContext(
+    buildPage({
+      title: "Moreland Theater Showtimes",
+      url: "https://morelandtheater.com/tickets/",
+      interactiveElements: [
+        ...genericLinks,
+        {
+          type: "button",
+          text: "Today",
+          role: "tab",
+          ariaSelected: true,
+          index: 80,
+          visible: true,
+          inViewport: true,
+          fullyInViewport: true,
+        },
+        {
+          type: "button",
+          text: "Tuesday",
+          role: "tab",
+          ariaSelected: false,
+          index: 81,
+          visible: true,
+          inViewport: true,
+          fullyInViewport: true,
+        },
+        {
+          type: "select",
+          label: "Showtime date",
+          index: 82,
+          options: [
+            { label: "Saturday", value: "2026-06-13" },
+            { label: "Sunday", value: "2026-06-14" },
+            { label: "Monday", value: "2026-06-15" },
+            { label: "Tuesday", value: "2026-06-16" },
+            { label: "Wednesday", value: "2026-06-17" },
+            { label: "Thursday", value: "2026-06-18" },
+            { label: "Friday", value: "2026-06-19" },
+          ],
+          visible: true,
+          inViewport: true,
+          fullyInViewport: true,
+        },
+        {
+          type: "link",
+          text: "Embedded ticketing page: app.formovietickets.com",
+          href: "https://app.formovietickets.com/?id=moreland&rtn=697452&page=pickTicket",
+          index: 83,
+          visible: true,
+          inViewport: true,
+          fullyInViewport: true,
+        },
+      ],
+    }),
+    "visible_only",
+  );
+
+  assert.match(context, /\[#80\] \[Today\] button \(role=tab, selected=true\)/);
+  assert.match(context, /\[#81\] \[Tuesday\] button \(role=tab, selected=false\)/);
+  assert.match(
+    context,
+    /\[#82\] \[Showtime date\] dropdown .*options=Saturday\|Sunday\|Monday\|Tuesday\|Wednesday\|Thursday\|Friday/,
+  );
+  assert.match(
+    context,
+    /\[#83\] \[Embedded ticketing page: app\.formovietickets\.com\] link/,
+  );
+});
+
 test("compact context keeps fill hints for visible fields", () => {
   const context = buildCompactScopedContext(
     buildPage({
