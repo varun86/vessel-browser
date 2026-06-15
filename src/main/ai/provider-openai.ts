@@ -156,9 +156,12 @@ function followUpReminderForProfile(
 }
 
 function extractSingleGoalDomain(goal: string): string | null {
+  // Match a single bare or prefixed hostname with at least one dot in the
+  // TLD portion. This intentionally accepts any TLD (country-code, new gTLD,
+  // etc.) rather than maintaining an allowlist.
   const matches = goal
     .toLowerCase()
-    .match(/\b(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+\.(?:com|org|net|io|dev|app|ai|co|edu|gov))\b/g);
+    .match(/\b(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+\.[a-z]{2,})\b/g);
   if (!matches || matches.length !== 1) return null;
 
   return matches[0]
@@ -488,15 +491,15 @@ export function formatOpenAICompatErrorMessage(
 ): string {
   if (
     providerId === 'openrouter' &&
-    /(timed out after \d+(?:\.\d+)? seconds|request timed out|returned none after all retries|no content|empty response)/i.test(
+    /(timed out after \d+(?:\.\d+)? seconds|request timed out|returned none after all retries|returned no content|empty response)/i.test(
       message,
     )
   ) {
-    return (
-      `${message} ` +
-      `OpenRouter reported an upstream model timeout/no-content failure. ` +
-      `If this persists, retry or pin a specific low-latency tool-calling model instead of the free router.`
-    );
+    return [
+      message,
+      'OpenRouter reported an upstream model timeout/no-content failure.',
+      'If this persists, retry or pin a specific low-latency tool-calling model instead of the free router.',
+    ].join(' ');
   }
 
   if (
@@ -505,12 +508,12 @@ export function formatOpenAICompatErrorMessage(
       message,
     )
   ) {
-    return (
-      `${message} ` +
-      `llama.cpp sets context size at server startup, not per request. ` +
-      `Vessel's agent prompt plus tool schema is about 6.5k tokens before browsing history, so run llama-server with ` +
-      `--ctx-size ${LLAMA_CPP_MIN_CTX_TOKENS} minimum (${LLAMA_CPP_RECOMMENDED_CTX_TOKENS} recommended).`
-    );
+    return [
+      message,
+      'llama.cpp sets context size at server startup, not per request.',
+      `Vessel's agent prompt plus tool schema is about 6.5k tokens before browsing history, so run llama-server with`,
+      `--ctx-size ${LLAMA_CPP_MIN_CTX_TOKENS} minimum (${LLAMA_CPP_RECOMMENDED_CTX_TOKENS} recommended).`,
+    ].join(' ');
   }
 
   return message;
