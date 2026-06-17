@@ -40,6 +40,7 @@ import {
   resizeDockedDevToolsPanel,
   toggleDockedDevToolsPanel,
 } from "../devtools/panel";
+import { refreshDevToolsPageMap } from "../devtools/tools";
 import { isSidebarAttached } from "../sidebar-panel";
 import {
   createKitFromText,
@@ -167,6 +168,11 @@ export function registerSystemHandlers(
     return dockDevToolsPanel(windowState, { relayout });
   });
 
+  ipcMain.handle(Channels.DEVTOOLS_PANEL_STATE_GET, async (event) => {
+    assertTrustedIpcSender(event);
+    return await refreshDevToolsPageMap(tabManager);
+  });
+
   ipcMain.handle(Channels.DEVTOOLS_PANEL_HOST_STATE_GET, (event) => {
     assertTrustedIpcSender(event);
     return getDevToolsPanelHostState(windowState);
@@ -177,6 +183,7 @@ export function registerSystemHandlers(
     const readyView = parseIpc(RendererViewSchema, view, "view");
     if (readyView !== "devtools") return;
     emitDevToolsPanelHostState(windowState);
+    void refreshDevToolsPageMap(tabManager);
   });
 
   ipcMain.handle(Channels.AUTOMATION_GET_INSTALLED, async (event) => {

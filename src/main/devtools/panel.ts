@@ -1,6 +1,9 @@
 import { type BaseWindow, type IpcMain, type WebContentsView } from "electron";
 import { Channels } from "../../shared/channels";
-import type { DevToolsPanelHostState } from "../../shared/devtools-types";
+import type {
+  DevToolsPanelHostState,
+  DevToolsPanelState,
+} from "../../shared/devtools-types";
 import type { UIState } from "../../shared/types";
 import {
   DETACHED_DEVTOOLS_DEFAULT_HEIGHT,
@@ -248,8 +251,17 @@ export function registerDisabledDevToolsPanelHandlers(
     detached: false,
     height: 0,
   };
+  const disabledPanelState: DevToolsPanelState = {
+    console: [],
+    network: [],
+    errors: [],
+    activity: [],
+    agentTrace: [],
+    pageMap: null,
+  };
   ipc.handle(Channels.DEVTOOLS_PANEL_TOGGLE, () => disabledDevToolsState);
   ipc.handle(Channels.DEVTOOLS_PANEL_CLOSE, () => disabledDevToolsState);
+  ipc.handle(Channels.DEVTOOLS_PANEL_STATE_GET, () => disabledPanelState);
   ipc.handle(Channels.DEVTOOLS_PANEL_RESIZE_START, () => undefined);
   ipc.handle(Channels.DEVTOOLS_PANEL_RESIZE, () => 0);
   ipc.handle(Channels.DEVTOOLS_PANEL_RESIZE_COMMIT, () => undefined);

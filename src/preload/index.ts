@@ -491,6 +491,8 @@ const api = {
       ipcRenderer.invoke(Channels.DEVTOOLS_PANEL_POPOUT),
     dock: (): Promise<DevToolsPanelHostState> =>
       ipcRenderer.invoke(Channels.DEVTOOLS_PANEL_DOCK),
+    getState: (): Promise<DevToolsPanelState> =>
+      ipcRenderer.invoke(Channels.DEVTOOLS_PANEL_STATE_GET),
     getHostState: (): Promise<DevToolsPanelHostState> =>
       ipcRenderer.invoke(Channels.DEVTOOLS_PANEL_HOST_STATE_GET),
     onStateUpdate: (cb: (state: DevToolsPanelState) => void): (() => void) => {

@@ -13,7 +13,10 @@ import {
 } from "./config/settings";
 import { startMcpServer, stopMcpServer } from "./mcp/server";
 import { AgentRuntime } from "./agent/runtime";
-import { setDevToolsPanelListener } from "./devtools/tools";
+import {
+  refreshDevToolsPageMap,
+  setDevToolsPanelListener,
+} from "./devtools/tools";
 import { installAdBlocking } from "./network/ad-blocking";
 import { installDownloadHandler } from "./network/downloads";
 import { startBackgroundRevalidation, stopBackgroundRevalidation } from "./premium/manager";
@@ -169,6 +172,9 @@ async function bootstrap(): Promise<void> {
     layoutViews(windowState);
     if (meta.persistSession) {
       runtime?.onTabStateChanged();
+    }
+    if (windowState.uiState.devtoolsPanelMode !== "closed") {
+      void refreshDevToolsPageMap(windowState.tabManager);
     }
   });
   windowStateForShutdown = windowState;

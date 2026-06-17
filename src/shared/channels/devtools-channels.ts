@@ -1,6 +1,7 @@
 export const DevToolsChannels = {
   DEVTOOLS_PANEL_TOGGLE: "devtools-panel:toggle",
   DEVTOOLS_PANEL_CLOSE: "devtools-panel:close",
+  DEVTOOLS_PANEL_STATE_GET: "devtools-panel:state-get",
   DEVTOOLS_PANEL_STATE: "devtools-panel:state",
   DEVTOOLS_PANEL_RESIZE_START: "devtools-panel:resize-start",
   DEVTOOLS_PANEL_RESIZE: "devtools-panel:resize",

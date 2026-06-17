@@ -2,64 +2,26 @@ import {
   createSignal,
   createEffect,
   onCleanup,
+  onMount,
   For,
   Show,
   type Component,
 } from "solid-js";
 import { ExternalLink, PanelBottomOpen } from "lucide-solid";
+import type {
+  ConsoleEntry,
+  DevToolsActivityEntry as ActivityEntry,
+  DevToolsAgentTraceEntry,
+  DevToolsPageMapSnapshot,
+  DevToolsPanelState as PanelState,
+  DevToolsPanelTab as PanelTab,
+  NetworkEntry,
+} from "../../../../shared/devtools-types";
+import { formatTime } from "../../lib/format-time";
 import { useDevToolsPanelHost } from "./useDevToolsPanelHost";
 import "./devtools.css";
 
-interface ConsoleEntry {
-  id: number;
-  timestamp: string;
-  level: string;
-  text: string;
-  url?: string;
-  line?: number;
-}
-
-interface NetworkEntry {
-  id: number;
-  requestId: string;
-  timestamp: string;
-  method: string;
-  url: string;
-  resourceType?: string;
-  status?: number;
-  timing?: { durationMs?: number };
-  error?: string;
-}
-
-interface ErrorEntry {
-  id: number;
-  timestamp: string;
-  type: string;
-  message: string;
-  description?: string;
-}
-
-interface ActivityEntry {
-  id: number;
-  timestamp: string;
-  tool: string;
-  args: string;
-  result: string;
-  durationMs: number;
-  status: "running" | "completed" | "failed";
-}
-
-interface PanelState {
-  console: ConsoleEntry[];
-  network: NetworkEntry[];
-  errors: ErrorEntry[];
-  activity: ActivityEntry[];
-}
-
-type PanelTab = "console" | "network" | "activity";
 type DateMode = "today" | "custom";
-
-import { formatTime } from "../../lib/format-time";
 
 function statusClass(status?: number): string {
   if (status == null) return "pending";
@@ -268,6 +230,166 @@ const ActivityView: Component<{ entries: ActivityEntry[] }> = (props) => {
   );
 };
 
+const AgentTraceView: Component<{ entries: DevToolsAgentTraceEntry[] }> = (
+  props,
+) => {
+  return (
+    <Show
+      when={props.entries.length > 0}
+      fallback={
+        <div class="devtools-empty">
+          Waiting for agent trace events...
+        </div>
+      }
+    >
+      <div class="devtools-agent-trace">
+        <For each={[...props.entries].reverse()}>
+          {(entry) => (
+            <div class={`trace-entry ${entry.status}`}>
+              <span class="trace-time">
+                {formatTime(entry.timestamp, { includeSeconds: true })}
+              </span>
+              <span class={`trace-kind ${entry.kind}`}>
+                {entry.kind.replace("tool-", "")}
+              </span>
+              <span class="trace-title" title={entry.title}>
+                {entry.title}
+              </span>
+              <span class="trace-detail" title={entry.detail}>
+                {entry.detail || "—"}
+              </span>
+              <span class={`trace-status ${entry.status}`}>
+                {entry.status}
+              </span>
+              <span class="trace-duration">
+                {entry.durationMs != null ? `${entry.durationMs}ms` : "—"}
+              </span>
+            </div>
+          )}
+        </For>
+      </div>
+    </Show>
+  );
+};
+
+const PageMapView: Component<{ snapshot: DevToolsPageMapSnapshot | null }> = (
+  props,
+) => {
+  const pageLabel = () =>
+    props.snapshot?.title || props.snapshot?.pageUrl || "Active page";
+
+  return (
+    <Show
+      when={props.snapshot}
+      fallback={<div class="devtools-empty">Inspecting active page...</div>}
+    >
+      {(snapshot) => (
+        <div class="devtools-page-map">
+          <div class="page-map-overview">
+            <div class="page-map-page" title={snapshot().pageUrl}>
+              <span class="page-map-title">{pageLabel()}</span>
+              <span class="page-map-url">{snapshot().pageUrl || "No URL"}</span>
+            </div>
+            <div class="page-map-stats">
+              <div class="page-map-stat">
+                <span class="page-map-stat-value">
+                  {snapshot().counts.total}
+                </span>
+                <span class="page-map-stat-label">total</span>
+              </div>
+              <div class="page-map-stat">
+                <span class="page-map-stat-value">
+                  {snapshot().counts.interactable}
+                </span>
+                <span class="page-map-stat-label">ready</span>
+              </div>
+              <div class="page-map-stat">
+                <span class="page-map-stat-value">
+                  {snapshot().counts.blocked}
+                </span>
+                <span class="page-map-stat-label">blocked</span>
+              </div>
+              <div class="page-map-stat">
+                <span class="page-map-stat-value">
+                  {snapshot().counts.disabled}
+                </span>
+                <span class="page-map-stat-label">disabled</span>
+              </div>
+            </div>
+          </div>
+
+          <Show when={snapshot().accessIssues.length > 0}>
+            <div class="page-map-issues">
+              <For each={snapshot().accessIssues}>
+                {(issue) => <span class="page-map-issue">{issue}</span>}
+              </For>
+            </div>
+          </Show>
+
+          <Show
+            when={snapshot().elements.length > 0}
+            fallback={
+              <div class="devtools-empty page-map-empty">
+                No interactive elements found on this page.
+              </div>
+            }
+          >
+            <div class="page-map-elements">
+              <div class="page-map-header">
+                <span>Element</span>
+                <span>Label</span>
+                <span>Selector</span>
+                <span>State</span>
+                <span>Bounds</span>
+              </div>
+              <For each={snapshot().elements}>
+                {(element) => (
+                  <div
+                    class="page-map-row"
+                    classList={{
+                      blocked: Boolean(element.issue),
+                      ready: element.interactable,
+                    }}
+                  >
+                    <span class="page-map-element-tag">
+                      {element.role ?? element.tag}
+                    </span>
+                    <span class="page-map-element-label" title={element.label}>
+                      {element.label}
+                    </span>
+                    <span
+                      class="page-map-element-selector"
+                      title={element.selector}
+                    >
+                      {element.selector}
+                    </span>
+                    <span
+                      class={`page-map-element-state ${
+                        element.interactable ? "ready" : "blocked"
+                      }`}
+                      title={element.issue}
+                    >
+                      {element.interactable
+                        ? "ready"
+                        : element.issue || (element.disabled ? "disabled" : "not ready")}
+                    </span>
+                    <span class="page-map-element-bounds">
+                      {Math.round(element.bounds.x)},{Math.round(element.bounds.y)}
+                      {" "}
+                      {Math.round(element.bounds.width)}x
+                      {Math.round(element.bounds.height)}
+                    </span>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
+      )}
+    </Show>
+  );
+};
+
 const DevToolsPanel: Component = () => {
   const [activeTab, setActiveTab] = createSignal<PanelTab>("console");
   const {
@@ -283,6 +405,8 @@ const DevToolsPanel: Component = () => {
     network: [],
     errors: [],
     activity: [],
+    agentTrace: [],
+    pageMap: null,
   });
 
   // Export state
@@ -290,12 +414,21 @@ const DevToolsPanel: Component = () => {
   const [exportConsole, setExportConsole] = createSignal(true);
   const [exportNetwork, setExportNetwork] = createSignal(true);
   const [exportActivity, setExportActivity] = createSignal(true);
+  const [exportTrace, setExportTrace] = createSignal(true);
+  const [exportPageMap, setExportPageMap] = createSignal(true);
   const [dateMode, setDateMode] = createSignal<DateMode>("today");
   const [dateFrom, setDateFrom] = createSignal(todayDateString());
   const [dateTo, setDateTo] = createSignal(todayDateString());
 
   let exportBtnRef: HTMLButtonElement | undefined;
   let exportDropdownRef: HTMLDivElement | undefined;
+
+  onMount(() => {
+    void window.vessel.devtoolsPanel
+      .getState()
+      .then(setState)
+      .catch(() => undefined);
+  });
 
   createEffect(() => {
     const cleanup = window.vessel.devtoolsPanel.onStateUpdate(
@@ -334,6 +467,9 @@ const DevToolsPanel: Component = () => {
   const networkCount = () => state().network.length;
   const activityRunning = () =>
     state().activity.filter((a) => a.status === "running").length;
+  const traceRunning = () =>
+    state().agentTrace.filter((entry) => entry.status === "running").length;
+  const pageMapCount = () => state().pageMap?.counts.interactable ?? 0;
 
   const handleExport = () => {
     const mode = dateMode();
@@ -357,6 +493,12 @@ const DevToolsPanel: Component = () => {
     if (exportActivity()) {
       data.activity = filterByDate(state().activity, mode, from, to);
     }
+    if (exportTrace()) {
+      data.agentTrace = filterByDate(state().agentTrace, mode, from, to);
+    }
+    if (exportPageMap()) {
+      data.pageMap = state().pageMap;
+    }
 
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: "application/json" });
@@ -371,7 +513,11 @@ const DevToolsPanel: Component = () => {
   };
 
   const noneSelected = () =>
-    !exportConsole() && !exportNetwork() && !exportActivity();
+    !exportConsole() &&
+    !exportNetwork() &&
+    !exportActivity() &&
+    !exportTrace() &&
+    !exportPageMap();
 
   return (
     <div
@@ -415,6 +561,24 @@ const DevToolsPanel: Component = () => {
             <span class="devtools-tab-badge count">{activityRunning()}</span>
           </Show>
         </button>
+        <button
+          class={`devtools-tab ${activeTab() === "agentTrace" ? "active" : ""}`}
+          onClick={() => setActiveTab("agentTrace")}
+        >
+          Trace
+          <Show when={traceRunning() > 0}>
+            <span class="devtools-tab-badge count">{traceRunning()}</span>
+          </Show>
+        </button>
+        <button
+          class={`devtools-tab ${activeTab() === "pageMap" ? "active" : ""}`}
+          onClick={() => setActiveTab("pageMap")}
+        >
+          Page Map
+          <Show when={pageMapCount() > 0}>
+            <span class="devtools-tab-badge count">{pageMapCount()}</span>
+          </Show>
+        </button>
         <div class="devtools-tab-spacer" />
         <div class="devtools-export-wrap">
           <button
@@ -455,6 +619,22 @@ const DevToolsPanel: Component = () => {
                     onChange={(e) => setExportActivity(e.currentTarget.checked)}
                   />
                   Activity
+                </label>
+                <label class="export-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={exportTrace()}
+                    onChange={(e) => setExportTrace(e.currentTarget.checked)}
+                  />
+                  Trace
+                </label>
+                <label class="export-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={exportPageMap()}
+                    onChange={(e) => setExportPageMap(e.currentTarget.checked)}
+                  />
+                  Page Map
                 </label>
               </div>
               <div class="export-section">
@@ -538,6 +718,12 @@ const DevToolsPanel: Component = () => {
         </Show>
         <Show when={activeTab() === "activity"}>
           <ActivityView entries={state().activity} />
+        </Show>
+        <Show when={activeTab() === "agentTrace"}>
+          <AgentTraceView entries={state().agentTrace} />
+        </Show>
+        <Show when={activeTab() === "pageMap"}>
+          <PageMapView snapshot={state().pageMap} />
         </Show>
       </div>
     </div>

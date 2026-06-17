@@ -4,7 +4,12 @@ import type { AgentRuntime } from "../agent/runtime";
 import { assertFeatureUnlocked } from "../premium/manager";
 import type { TabManager } from "../tabs/tab-manager";
 import { getOrCreateSession, getSession } from "./manager";
-import type { DevToolsActivityEntry, DevToolsPanelState } from "./types";
+import type {
+  DevToolsActivityEntry,
+  DevToolsAgentTraceEntry,
+  DevToolsPageMapSnapshot,
+  DevToolsPanelState,
+} from "./types";
 
 function asTextResponse(text: string) {
   return { content: [{ type: "text" as const, text }] };
@@ -19,8 +24,13 @@ const DANGEROUS_DEVTOOLS_ACTIONS = new Set([
 // State broadcast for the DevTools panel UI
 let stateListener: ((state: DevToolsPanelState) => void) | null = null;
 const activityLog: DevToolsActivityEntry[] = [];
+const agentTraceLog: DevToolsAgentTraceEntry[] = [];
 const MAX_ACTIVITY_ENTRIES = 100;
+const MAX_TRACE_ENTRIES = 200;
 let activityCounter = 0;
+let traceCounter = 0;
+let latestPageMap: DevToolsPageMapSnapshot | null = null;
+let pageMapRefreshInFlight = false;
 
 export function setDevToolsPanelListener(
   listener: ((state: DevToolsPanelState) => void) | null,
@@ -35,13 +45,217 @@ export function getDevToolsPanelState(tabId: string | null): DevToolsPanelState 
     network: session?.getNetworkLog() ?? [],
     errors: session?.getErrors() ?? [],
     activity: activityLog,
+    agentTrace: agentTraceLog,
+    pageMap: latestPageMap,
   };
 }
 
-function broadcastState(tabManager: TabManager): void {
+export function broadcastDevToolsPanelState(tabManager: TabManager): void {
   if (!stateListener) return;
   const tabId = tabManager.getActiveTabId();
   stateListener(getDevToolsPanelState(tabId));
+}
+
+function pushTrace(
+  entry: Omit<DevToolsAgentTraceEntry, "id" | "timestamp">,
+): DevToolsAgentTraceEntry {
+  const traceEntry: DevToolsAgentTraceEntry = {
+    id: ++traceCounter,
+    timestamp: new Date().toISOString(),
+    ...entry,
+  };
+  agentTraceLog.push(traceEntry);
+  if (agentTraceLog.length > MAX_TRACE_ENTRIES) {
+    agentTraceLog.splice(0, agentTraceLog.length - MAX_TRACE_ENTRIES);
+  }
+  return traceEntry;
+}
+
+const PAGE_MAP_SCRIPT = `
+(() => {
+  const INTERACTIVE_SELECTOR = [
+    "a[href]",
+    "button",
+    "input",
+    "select",
+    "textarea",
+    "summary",
+    "[role='button']",
+    "[role='link']",
+    "[role='checkbox']",
+    "[role='radio']",
+    "[role='switch']",
+    "[role='tab']",
+    "[role='menuitem']",
+    "[contenteditable='true']",
+    "[tabindex]:not([tabindex='-1'])"
+  ].join(",");
+
+  function round(value) {
+    return Math.round(value * 10) / 10;
+  }
+
+  function textFor(el) {
+    const direct =
+      el.getAttribute("aria-label") ||
+      el.getAttribute("title") ||
+      el.getAttribute("placeholder") ||
+      el.getAttribute("alt") ||
+      el.value ||
+      el.innerText ||
+      el.textContent ||
+      "";
+    return String(direct).replace(/\\s+/g, " ").trim().slice(0, 140);
+  }
+
+  function selectorFor(el) {
+    if (el.id) return "#" + CSS.escape(el.id);
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === Node.ELEMENT_NODE && parts.length < 4) {
+      let part = node.localName;
+      const classes = Array.from(node.classList || []).slice(0, 2);
+      if (classes.length) part += "." + classes.map((c) => CSS.escape(c)).join(".");
+      const parent = node.parentElement;
+      if (parent) {
+        const siblings = Array.from(parent.children).filter((child) => child.localName === node.localName);
+        if (siblings.length > 1) part += ":nth-of-type(" + (siblings.indexOf(node) + 1) + ")";
+      }
+      parts.unshift(part);
+      node = parent;
+    }
+    return parts.join(" > ");
+  }
+
+  function isVisible(el, style, rect) {
+    return rect.width > 0 &&
+      rect.height > 0 &&
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      Number(style.opacity || "1") > 0.01;
+  }
+
+  const viewport = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+  };
+
+  const candidates = Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR));
+  const elements = candidates.slice(0, 120).map((el, index) => {
+    const style = window.getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    const visible = isVisible(el, style, rect);
+    const disabled = Boolean(el.disabled) || el.getAttribute("aria-disabled") === "true";
+    const inViewport = rect.bottom >= 0 && rect.right >= 0 && rect.top <= viewport.height && rect.left <= viewport.width;
+    let issue = "";
+    let blocked = false;
+    if (!visible) issue = "hidden";
+    else if (!inViewport) issue = "offscreen";
+    else {
+      const centerX = Math.min(Math.max(rect.left + rect.width / 2, 0), viewport.width - 1);
+      const centerY = Math.min(Math.max(rect.top + rect.height / 2, 0), viewport.height - 1);
+      const top = document.elementFromPoint(centerX, centerY);
+      if (top && top !== el && !el.contains(top)) {
+        blocked = true;
+        issue = "covered by " + top.localName;
+      }
+    }
+    return {
+      id: index + 1,
+      tag: el.localName,
+      role: el.getAttribute("role") || undefined,
+      label: textFor(el) || "(unlabeled)",
+      selector: selectorFor(el),
+      href: el.href || undefined,
+      type: el.type || undefined,
+      visible,
+      interactable: visible && inViewport && !disabled && !blocked,
+      disabled,
+      issue: issue || undefined,
+      bounds: {
+        x: round(rect.x),
+        y: round(rect.y),
+        width: round(rect.width),
+        height: round(rect.height),
+      },
+    };
+  });
+
+  const counts = elements.reduce((acc, element) => {
+    acc.total += 1;
+    if (element.visible) acc.visible += 1;
+    if (element.interactable) acc.interactable += 1;
+    if (element.disabled) acc.disabled += 1;
+    if (element.issue && element.issue.startsWith("covered")) acc.blocked += 1;
+    return acc;
+  }, { total: 0, visible: 0, interactable: 0, disabled: 0, blocked: 0 });
+
+  return {
+    timestamp: new Date().toISOString(),
+    pageUrl: location.href,
+    title: document.title || "",
+    viewport,
+    counts,
+    elements,
+    accessIssues: elements.length === 0 ? ["No obvious interactive elements found."] : [],
+  };
+})()
+`;
+
+async function capturePageMapSnapshot(
+  tabManager: TabManager,
+): Promise<DevToolsPageMapSnapshot | null> {
+  const tab = tabManager.getActiveTab();
+  if (!tab || tab.view.webContents.isDestroyed()) {
+    return {
+      timestamp: new Date().toISOString(),
+      pageUrl: "",
+      title: "No active tab",
+      viewport: { width: 0, height: 0, scrollX: 0, scrollY: 0 },
+      counts: { total: 0, visible: 0, interactable: 0, disabled: 0, blocked: 0 },
+      elements: [],
+      accessIssues: ["No active tab is available."],
+    };
+  }
+
+  try {
+    return await tab.view.webContents.executeJavaScript(PAGE_MAP_SCRIPT, true);
+  } catch (error) {
+    return {
+      timestamp: new Date().toISOString(),
+      pageUrl: tab.view.webContents.getURL(),
+      title: "Page map unavailable",
+      viewport: { width: 0, height: 0, scrollX: 0, scrollY: 0 },
+      counts: { total: 0, visible: 0, interactable: 0, disabled: 0, blocked: 0 },
+      elements: [],
+      accessIssues: [
+        error instanceof Error ? error.message : "Could not inspect active page.",
+      ],
+    };
+  }
+}
+
+export async function refreshDevToolsPageMap(
+  tabManager: TabManager,
+): Promise<DevToolsPanelState> {
+  if (pageMapRefreshInFlight) {
+    return getDevToolsPanelState(tabManager.getActiveTabId());
+  }
+  pageMapRefreshInFlight = true;
+  try {
+    latestPageMap = await capturePageMapSnapshot(tabManager);
+  } finally {
+    pageMapRefreshInFlight = false;
+  }
+  broadcastDevToolsPanelState(tabManager);
+  return getDevToolsPanelState(tabManager.getActiveTabId());
+}
+
+function broadcastState(tabManager: TabManager): void {
+  broadcastDevToolsPanelState(tabManager);
+  void refreshDevToolsPageMap(tabManager);
 }
 
 async function withDevToolsAction(
@@ -72,6 +286,13 @@ async function withDevToolsAction(
   if (activityLog.length > MAX_ACTIVITY_ENTRIES) {
     activityLog.splice(0, activityLog.length - MAX_ACTIVITY_ENTRIES);
   }
+  const startTrace = pushTrace({
+    kind: "tool-start",
+    title: `Started ${name.replace(/^devtools_/, "")}`,
+    detail: JSON.stringify(args).slice(0, 240),
+    status: "running",
+    tool: name,
+  });
   broadcastState(tabManager);
 
   const startTime = Date.now();
@@ -87,6 +308,16 @@ async function withDevToolsAction(
     activityEntry.status = "completed";
     activityEntry.result = result.slice(0, 200);
     activityEntry.durationMs = Date.now() - startTime;
+    startTrace.status = "completed";
+    startTrace.durationMs = activityEntry.durationMs;
+    pushTrace({
+      kind: "tool-complete",
+      title: `Completed ${name.replace(/^devtools_/, "")}`,
+      detail: result.slice(0, 240),
+      status: "completed",
+      tool: name,
+      durationMs: activityEntry.durationMs,
+    });
     broadcastState(tabManager);
     return asTextResponse(result);
   } catch (error) {
@@ -94,6 +325,16 @@ async function withDevToolsAction(
     activityEntry.status = "failed";
     activityEntry.result = message.slice(0, 200);
     activityEntry.durationMs = Date.now() - startTime;
+    startTrace.status = "failed";
+    startTrace.durationMs = activityEntry.durationMs;
+    pushTrace({
+      kind: "tool-error",
+      title: `Failed ${name.replace(/^devtools_/, "")}`,
+      detail: message.slice(0, 240),
+      status: "failed",
+      tool: name,
+      durationMs: activityEntry.durationMs,
+    });
     broadcastState(tabManager);
     return asTextResponse(`Error: ${message}`);
   }
