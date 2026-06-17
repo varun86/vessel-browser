@@ -1,6 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { AgentRuntime } from "../agent/runtime";
+import type {
+  AgentRuntime,
+  AgentRuntimeActionLifecycleEvent,
+} from "../agent/runtime";
 import { assertFeatureUnlocked } from "../premium/manager";
 import type { TabManager } from "../tabs/tab-manager";
 import { getOrCreateSession, getSession } from "./manager";
@@ -31,6 +34,7 @@ let activityCounter = 0;
 let traceCounter = 0;
 let latestPageMap: DevToolsPageMapSnapshot | null = null;
 let pageMapRefreshInFlight = false;
+const traceEntriesByActionId = new Map<string, DevToolsAgentTraceEntry>();
 
 export function setDevToolsPanelListener(
   listener: ((state: DevToolsPanelState) => void) | null,
@@ -66,9 +70,80 @@ function pushTrace(
   };
   agentTraceLog.push(traceEntry);
   if (agentTraceLog.length > MAX_TRACE_ENTRIES) {
-    agentTraceLog.splice(0, agentTraceLog.length - MAX_TRACE_ENTRIES);
+    const removed = agentTraceLog.splice(
+      0,
+      agentTraceLog.length - MAX_TRACE_ENTRIES,
+    );
+    for (const trace of removed) {
+      if (trace.actionId) traceEntriesByActionId.delete(trace.actionId);
+    }
   }
   return traceEntry;
+}
+
+function formatTraceActionName(name: string): string {
+  return name
+    .replace(/^devtools_/, "")
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function traceDetail(event: AgentRuntimeActionLifecycleEvent): string {
+  const sourcePrefix = event.source === "ai" ? "Agent" : event.source.toUpperCase();
+  return [sourcePrefix, event.detail].filter(Boolean).join(": ").slice(0, 240);
+}
+
+export function recordDevToolsAgentAction(
+  event: AgentRuntimeActionLifecycleEvent,
+  tabManager: TabManager,
+): void {
+  const actionName = formatTraceActionName(event.name);
+  if (event.phase === "started") {
+    const entry = pushTrace({
+      actionId: event.actionId,
+      kind: "tool-start",
+      title: `Started ${actionName}`,
+      detail: traceDetail(event),
+      status: "running",
+      tool: event.name,
+    });
+    traceEntriesByActionId.set(event.actionId, entry);
+    broadcastDevToolsPanelState(tabManager);
+    return;
+  }
+
+  const startEntry = traceEntriesByActionId.get(event.actionId);
+  if (startEntry) {
+    startEntry.status =
+      event.phase === "completed" ? "completed" : "failed";
+    startEntry.durationMs = event.durationMs;
+    if (event.phase === "waiting-approval") {
+      startEntry.status = "running";
+      startEntry.detail = traceDetail(event);
+    }
+  }
+
+  if (event.phase === "waiting-approval") {
+    broadcastDevToolsPanelState(tabManager);
+    return;
+  }
+
+  pushTrace({
+    actionId: event.actionId,
+    kind: event.phase === "completed" ? "tool-complete" : "tool-error",
+    title:
+      event.phase === "completed"
+        ? `Completed ${actionName}`
+        : `${event.phase === "rejected" ? "Rejected" : "Failed"} ${actionName}`,
+    detail: traceDetail(event),
+    status: event.phase === "completed" ? "completed" : "failed",
+    tool: event.name,
+    durationMs: event.durationMs,
+  });
+  traceEntriesByActionId.delete(event.actionId);
+  broadcastDevToolsPanelState(tabManager);
 }
 
 const PAGE_MAP_SCRIPT = `
@@ -286,13 +361,6 @@ async function withDevToolsAction(
   if (activityLog.length > MAX_ACTIVITY_ENTRIES) {
     activityLog.splice(0, activityLog.length - MAX_ACTIVITY_ENTRIES);
   }
-  const startTrace = pushTrace({
-    kind: "tool-start",
-    title: `Started ${name.replace(/^devtools_/, "")}`,
-    detail: JSON.stringify(args).slice(0, 240),
-    status: "running",
-    tool: name,
-  });
   broadcastState(tabManager);
 
   const startTime = Date.now();
@@ -308,16 +376,6 @@ async function withDevToolsAction(
     activityEntry.status = "completed";
     activityEntry.result = result.slice(0, 200);
     activityEntry.durationMs = Date.now() - startTime;
-    startTrace.status = "completed";
-    startTrace.durationMs = activityEntry.durationMs;
-    pushTrace({
-      kind: "tool-complete",
-      title: `Completed ${name.replace(/^devtools_/, "")}`,
-      detail: result.slice(0, 240),
-      status: "completed",
-      tool: name,
-      durationMs: activityEntry.durationMs,
-    });
     broadcastState(tabManager);
     return asTextResponse(result);
   } catch (error) {
@@ -325,16 +383,6 @@ async function withDevToolsAction(
     activityEntry.status = "failed";
     activityEntry.result = message.slice(0, 200);
     activityEntry.durationMs = Date.now() - startTime;
-    startTrace.status = "failed";
-    startTrace.durationMs = activityEntry.durationMs;
-    pushTrace({
-      kind: "tool-error",
-      title: `Failed ${name.replace(/^devtools_/, "")}`,
-      detail: message.slice(0, 240),
-      status: "failed",
-      tool: name,
-      durationMs: activityEntry.durationMs,
-    });
     broadcastState(tabManager);
     return asTextResponse(`Error: ${message}`);
   }

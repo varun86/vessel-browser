@@ -565,7 +565,7 @@ const DevToolsPanel: Component = () => {
           class={`devtools-tab ${activeTab() === "agentTrace" ? "active" : ""}`}
           onClick={() => setActiveTab("agentTrace")}
         >
-          Trace
+          Agent Trace
           <Show when={traceRunning() > 0}>
             <span class="devtools-tab-badge count">{traceRunning()}</span>
           </Show>

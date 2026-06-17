@@ -69,6 +69,7 @@ export interface DevToolsActivityEntry {
 
 export interface DevToolsAgentTraceEntry {
   id: number;
+  actionId?: string;
   timestamp: string;
   kind: "tool-start" | "tool-complete" | "tool-error";
   title: string;

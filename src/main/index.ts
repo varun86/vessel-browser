@@ -14,6 +14,7 @@ import {
 import { startMcpServer, stopMcpServer } from "./mcp/server";
 import { AgentRuntime } from "./agent/runtime";
 import {
+  recordDevToolsAgentAction,
   refreshDevToolsPageMap,
   setDevToolsPanelListener,
 } from "./devtools/tools";
@@ -196,6 +197,9 @@ async function bootstrap(): Promise<void> {
 
   const { chromeView, sidebarView, devtoolsPanelView, tabManager } = windowState;
   runtime = new AgentRuntime(tabManager);
+  runtime.setActionLifecycleListener((event) => {
+    recordDevToolsAgentAction(event, tabManager);
+  });
   installAdBlocking(tabManager);
 
   // Wire devtools panel state updates to the devtools panel renderer view
