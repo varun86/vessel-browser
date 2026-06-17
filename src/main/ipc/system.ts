@@ -25,10 +25,21 @@ import {
 import type { WindowState } from "../window";
 import type { ClearDataOptions } from "../../shared/types";
 import {
+  CHROME_HEIGHT,
+  getWindowIconPath,
   layoutViews,
   MIN_DEVTOOLS_PANEL,
   MAX_DEVTOOLS_PANEL,
 } from "../window";
+import {
+  closeDevToolsPanel,
+  detachDevToolsPanel,
+  dockDevToolsPanel,
+  emitDevToolsPanelHostState,
+  getDevToolsPanelHostState,
+  resizeDockedDevToolsPanel,
+  toggleDockedDevToolsPanel,
+} from "../devtools/panel";
 import {
   createKitFromText,
   getInstalledKits,
@@ -42,26 +53,68 @@ import { assertFeatureUnlocked } from "../premium/manager";
 const KitIdSchema = z.string().min(1);
 const SkillSourceSchema = z.string().min(1).max(100_000);
 const OriginSchema = z.string().min(1);
+const DevToolsHeightSchema = z.number().finite().min(0).max(2000);
+const RendererViewSchema = z.enum(["chrome", "sidebar", "devtools"]);
 
 export function registerSystemHandlers(
   windowState: WindowState,
   sendToRendererViews: SendToRendererViews,
 ): void {
   const { tabManager } = windowState;
+  const relayout = () => layoutViews(windowState);
+  const maxDockedDevToolsHeight = () => {
+    const [, windowHeight] = windowState.mainWindow.getContentSize();
+    const chromeHeight = windowState.uiState.focusMode ? 0 : CHROME_HEIGHT;
+    return Math.max(
+      MIN_DEVTOOLS_PANEL,
+      Math.min(MAX_DEVTOOLS_PANEL, windowHeight - chromeHeight - 80),
+    );
+  };
 
   ipcMain.handle(Channels.DEVTOOLS_PANEL_TOGGLE, (event) => {
     assertTrustedIpcSender(event);
-    windowState.uiState.devtoolsPanelOpen = !windowState.uiState.devtoolsPanelOpen;
-    layoutViews(windowState);
-    return { open: windowState.uiState.devtoolsPanelOpen };
+    return toggleDockedDevToolsPanel(windowState, { relayout });
   });
 
-  ipcMain.handle(Channels.DEVTOOLS_PANEL_RESIZE, (event, height: number) => {
+  ipcMain.handle(Channels.DEVTOOLS_PANEL_CLOSE, (event) => {
     assertTrustedIpcSender(event);
-    const clamped = Math.max(MIN_DEVTOOLS_PANEL, Math.min(MAX_DEVTOOLS_PANEL, Math.round(height)));
-    windowState.uiState.devtoolsPanelHeight = clamped;
-    layoutViews(windowState);
+    return closeDevToolsPanel(windowState, { relayout });
+  });
+
+  ipcMain.handle(Channels.DEVTOOLS_PANEL_RESIZE, (event, height: unknown) => {
+    assertTrustedIpcSender(event);
+    const validatedHeight = parseIpc(DevToolsHeightSchema, height, "height");
+    const clamped = Math.max(
+      MIN_DEVTOOLS_PANEL,
+      Math.min(maxDockedDevToolsHeight(), Math.round(validatedHeight)),
+    );
+    resizeDockedDevToolsPanel(windowState, clamped, relayout);
     return clamped;
+  });
+
+  ipcMain.handle(Channels.DEVTOOLS_PANEL_POPOUT, (event) => {
+    assertTrustedIpcSender(event);
+    return detachDevToolsPanel(windowState, {
+      relayout,
+      getWindowIconPath,
+    });
+  });
+
+  ipcMain.handle(Channels.DEVTOOLS_PANEL_DOCK, (event) => {
+    assertTrustedIpcSender(event);
+    return dockDevToolsPanel(windowState, { relayout });
+  });
+
+  ipcMain.handle(Channels.DEVTOOLS_PANEL_HOST_STATE_GET, (event) => {
+    assertTrustedIpcSender(event);
+    return getDevToolsPanelHostState(windowState);
+  });
+
+  ipcMain.on(Channels.RENDERER_VIEW_READY, (event, view: unknown) => {
+    assertTrustedIpcSender(event);
+    const readyView = parseIpc(RendererViewSchema, view, "view");
+    if (readyView !== "devtools") return;
+    emitDevToolsPanelHostState(windowState);
   });
 
   ipcMain.handle(Channels.AUTOMATION_GET_INSTALLED, async (event) => {

@@ -6,6 +6,8 @@ import {
   Show,
   type Component,
 } from "solid-js";
+import { ExternalLink, PanelBottomOpen } from "lucide-solid";
+import { useDevToolsPanelHost } from "./useDevToolsPanelHost";
 import "./devtools.css";
 
 interface ConsoleEntry {
@@ -268,6 +270,14 @@ const ActivityView: Component<{ entries: ActivityEntry[] }> = (props) => {
 
 const DevToolsPanel: Component = () => {
   const [activeTab, setActiveTab] = createSignal<PanelTab>("console");
+  const {
+    hostState,
+    isResizing,
+    close,
+    togglePlacement,
+    startResize,
+    applyHostState,
+  } = useDevToolsPanelHost();
   const [state, setState] = createSignal<PanelState>({
     console: [],
     network: [],
@@ -296,6 +306,12 @@ const DevToolsPanel: Component = () => {
     onCleanup(cleanup);
   });
 
+  createEffect(() => {
+    const cleanup =
+      window.vessel.devtoolsPanel.onHostStateUpdate(applyHostState);
+    onCleanup(cleanup);
+  });
+
   // Close export dropdown on outside click
   createEffect(() => {
     if (!showExport()) return;
@@ -318,10 +334,6 @@ const DevToolsPanel: Component = () => {
   const networkCount = () => state().network.length;
   const activityRunning = () =>
     state().activity.filter((a) => a.status === "running").length;
-
-  const close = () => {
-    window.vessel.devtoolsPanel.toggle();
-  };
 
   const handleExport = () => {
     const mode = dateMode();
@@ -363,6 +375,14 @@ const DevToolsPanel: Component = () => {
 
   return (
     <div class="devtools-panel">
+      <Show when={!hostState().detached}>
+        <div
+          class="devtools-resize-handle"
+          classList={{ resizing: isResizing() }}
+          onPointerDown={startResize}
+          title="Resize DevTools"
+        />
+      </Show>
       <div class="devtools-tabs">
         <button
           class={`devtools-tab ${activeTab() === "console" ? "active" : ""}`}
@@ -482,9 +502,28 @@ const DevToolsPanel: Component = () => {
             </div>
           </Show>
         </div>
-        <button class="devtools-close-btn" onClick={close} title="Close DevTools">
-          ×
+        <button
+          class="devtools-close-btn"
+          onClick={togglePlacement}
+          title={hostState().detached ? "Dock DevTools" : "Pop out DevTools"}
+          aria-label={hostState().detached ? "Dock DevTools" : "Pop out DevTools"}
+        >
+          <Show
+            when={hostState().detached}
+            fallback={<ExternalLink size={14} aria-hidden="true" />}
+          >
+            <PanelBottomOpen size={14} aria-hidden="true" />
+          </Show>
         </button>
+        <Show when={!hostState().detached}>
+          <button
+            class="devtools-close-btn"
+            onClick={close}
+            title="Close DevTools"
+          >
+            ×
+          </button>
+        </Show>
       </div>
       <div class="devtools-content">
         <Show when={activeTab() === "console"}>

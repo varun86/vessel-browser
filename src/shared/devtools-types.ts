@@ -68,3 +68,9 @@ export interface DevToolsPanelState {
   errors: ErrorEntry[];
   activity: DevToolsActivityEntry[];
 }
+
+export interface DevToolsPanelHostState {
+  open: boolean;
+  detached: boolean;
+  height: number;
+}
