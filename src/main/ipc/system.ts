@@ -41,7 +41,11 @@ import {
   resizeDockedDevToolsPanel,
   toggleDockedDevToolsPanel,
 } from "../devtools/panel";
-import { refreshDevToolsPageMap } from "../devtools/tools";
+import {
+  disableCaptureForTab,
+  enableCaptureForTab,
+  refreshDevToolsPageMap,
+} from "../devtools/tools";
 import { isSidebarAttached } from "../sidebar-panel";
 import {
   createKitFromText,
@@ -109,21 +113,31 @@ export function registerSystemHandlers(
   ipcMain.handle(Channels.DEVTOOLS_PANEL_TOGGLE, (event) => {
     assertTrustedIpcSender(event);
     stopDevToolsResize();
-    return toggleDockedDevToolsPanel(windowState, { relayout });
+    const hostState = toggleDockedDevToolsPanel(windowState, { relayout });
+    if (hostState.open) {
+      void enableCaptureForTab(tabManager);
+    } else {
+      disableCaptureForTab();
+    }
+    return hostState;
   });
 
   ipcMain.handle(Channels.DEVTOOLS_PANEL_CLOSE, (event) => {
     assertTrustedIpcSender(event);
     stopDevToolsResize();
-    return closeDevToolsPanel(windowState, { relayout });
+    const hostState = closeDevToolsPanel(windowState, { relayout });
+    disableCaptureForTab();
+    return hostState;
   });
 
   ipcMain.handle(Channels.DEVTOOLS_PANEL_OPEN_TAB, (event, tab: unknown) => {
     assertTrustedIpcSender(event);
     const selectedTab = parseIpc(DevToolsPanelTabSchema, tab, "tab");
     stopDevToolsResize();
-    if (!getDevToolsPanelHostState(windowState).open) {
+    const wasOpen = getDevToolsPanelHostState(windowState).open;
+    if (!wasOpen) {
       toggleDockedDevToolsPanel(windowState, { relayout });
+      void enableCaptureForTab(tabManager);
     } else if (getDevToolsPanelHostState(windowState).detached) {
       windowState.devtoolsPanelWindow?.focus();
     }
@@ -199,6 +213,9 @@ export function registerSystemHandlers(
 
   ipcMain.handle(Channels.DEVTOOLS_PANEL_STATE_GET, async (event) => {
     assertTrustedIpcSender(event);
+    if (getDevToolsPanelHostState(windowState).open) {
+      void enableCaptureForTab(tabManager);
+    }
     return await refreshDevToolsPageMap(tabManager);
   });
 
@@ -213,6 +230,10 @@ export function registerSystemHandlers(
     if (readyView !== "devtools") return;
     emitDevToolsPanelHostState(windowState);
     void refreshDevToolsPageMap(tabManager);
+    // If the panel is open, ensure capture is active for the active tab.
+    if (getDevToolsPanelHostState(windowState).open) {
+      void enableCaptureForTab(tabManager);
+    }
   });
 
   ipcMain.handle(Channels.AUTOMATION_GET_INSTALLED, async (event) => {

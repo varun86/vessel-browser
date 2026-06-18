@@ -6,7 +6,7 @@ import type {
 } from "../agent/runtime";
 import { assertFeatureUnlocked } from "../premium/manager";
 import type { TabManager } from "../tabs/tab-manager";
-import { getOrCreateSession, getSession } from "./manager";
+import { getOrCreateSession, getSession, destroySession } from "./manager";
 import type {
   DevToolsActivityEntry,
   DevToolsAgentTraceEntry,
@@ -58,6 +58,96 @@ export function broadcastDevToolsPanelState(tabManager: TabManager): void {
   if (!stateListener) return;
   const tabId = tabManager.getActiveTabId();
   stateListener(getDevToolsPanelState(tabId));
+}
+
+// Coalesce bursts of CDP capture events (a page load fires many
+// Network.* events in quick succession) into a single panel push per tick.
+let panelBroadcastScheduled = false;
+let panelBroadcastTabManager: TabManager | null = null;
+let panelCapturedTabId: string | null = null;
+const panelOwnedCaptureTabs = new Set<string>();
+
+function schedulePanelBroadcast(tabManager: TabManager): void {
+  panelBroadcastTabManager = tabManager;
+  if (panelBroadcastScheduled) return;
+  panelBroadcastScheduled = true;
+  queueMicrotask(() => {
+    panelBroadcastScheduled = false;
+    if (panelBroadcastTabManager) {
+      broadcastDevToolsPanelState(panelBroadcastTabManager);
+    }
+  });
+}
+
+function releasePanelCaptureForTab(tabId: string): void {
+  const session = getSession(tabId);
+  session?.setOnCaptureChange(null);
+  if (panelCapturedTabId === tabId) {
+    panelCapturedTabId = null;
+  }
+  if (panelOwnedCaptureTabs.delete(tabId)) {
+    destroySession(tabId);
+  }
+}
+
+function markActiveSessionToolOwned(tabManager: TabManager): void {
+  const tabId = tabManager.getActiveTabId();
+  if (tabId) {
+    panelOwnedCaptureTabs.delete(tabId);
+  }
+}
+
+/**
+ * Enable console/network/error capture for the active tab and wire its
+ * capture-change callback to the coalesced panel broadcaster. Used when the
+ * DevTools panel opens so manual browsing is captured without an agent action.
+ * Idempotent: enabling domains is guarded inside DevToolsSession.
+ */
+export async function enableCaptureForTab(
+  tabManager: TabManager,
+): Promise<void> {
+  const tabId = tabManager.getActiveTabId();
+  if (!tabId) return;
+  if (panelCapturedTabId && panelCapturedTabId !== tabId) {
+    releasePanelCaptureForTab(panelCapturedTabId);
+  }
+
+  let session = getSession(tabId);
+  const panelCreatedSession = !session;
+  session ??= getOrCreateSession(tabManager);
+  if (panelCreatedSession) {
+    panelOwnedCaptureTabs.add(tabId);
+  }
+
+  panelCapturedTabId = tabId;
+  session.setOnCaptureChange(() => {
+    if (panelCapturedTabId === tabId) {
+      schedulePanelBroadcast(tabManager);
+    }
+  });
+  await session.enableCapture();
+  // Push the current (possibly pre-existing) buffer contents immediately.
+  if (panelCapturedTabId === tabId) {
+    broadcastDevToolsPanelState(tabManager);
+  }
+}
+
+/**
+ * Tear down panel-owned capture. Existing agent/tool sessions keep their
+ * buffers and debugger attachment; sessions created solely for the panel are
+ * destroyed so capture does not keep running in the background.
+ */
+export function disableCaptureForTab(tabId?: string | null): void {
+  const targetTabId = tabId ?? panelCapturedTabId;
+  if (targetTabId) {
+    releasePanelCaptureForTab(targetTabId);
+  }
+  if (tabId == null) {
+    for (const ownedTabId of [...panelOwnedCaptureTabs]) {
+      releasePanelCaptureForTab(ownedTabId);
+    }
+    panelBroadcastTabManager = null;
+  }
 }
 
 function pushTrace(
@@ -347,6 +437,7 @@ async function withDevToolsAction(
       `Error: ${error instanceof Error ? error.message : "DevTools require Vessel Premium."}`,
     );
   }
+  markActiveSessionToolOwned(tabManager);
 
   const activityEntry: DevToolsActivityEntry = {
     id: ++activityCounter,

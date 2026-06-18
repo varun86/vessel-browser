@@ -17,6 +17,7 @@ import {
   recordDevToolsAgentAction,
   refreshDevToolsPageMap,
   setDevToolsPanelListener,
+  enableCaptureForTab,
 } from "./devtools/tools";
 import { installAdBlocking } from "./network/ad-blocking";
 import { installDownloadHandler } from "./network/downloads";
@@ -175,6 +176,7 @@ async function bootstrap(): Promise<void> {
       runtime?.onTabStateChanged();
     }
     if (windowState.uiState.devtoolsPanelMode !== "closed") {
+      void enableCaptureForTab(windowState.tabManager);
       void refreshDevToolsPageMap(windowState.tabManager);
     }
   });

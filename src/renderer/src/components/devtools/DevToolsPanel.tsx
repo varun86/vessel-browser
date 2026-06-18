@@ -98,8 +98,8 @@ const ConsoleView: Component<{ entries: ConsoleEntry[] }> = (props) => {
       when={props.entries.length > 0}
       fallback={
         <div class="devtools-empty">
-          Waiting for console output... Console monitoring activates when an
-          agent uses devtools.
+          Waiting for console output... Open a page and console output will
+          appear here as the page runs.
         </div>
       }
     >
@@ -146,8 +146,8 @@ const NetworkView: Component<{ entries: NetworkEntry[] }> = (props) => {
       when={props.entries.length > 0}
       fallback={
         <div class="devtools-empty">
-          Waiting for network requests... Network monitoring activates when an
-          agent uses devtools.
+          Waiting for network requests... Open a page and network requests will
+          appear here as the page loads.
         </div>
       }
     >
