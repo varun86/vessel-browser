@@ -7,11 +7,13 @@ import {
   Show,
   type Component,
 } from "solid-js";
-import { ExternalLink, PanelBottomOpen } from "lucide-solid";
+import { Check, Copy, ExternalLink, PanelBottomOpen } from "lucide-solid";
 import type {
   ConsoleEntry,
   DevToolsActivityEntry as ActivityEntry,
   DevToolsAgentTraceEntry,
+  DevToolsPageMapElement,
+  DevToolsPageMapRevealStatus,
   DevToolsPageMapSnapshot,
   DevToolsPanelState as PanelState,
   DevToolsPanelTab as PanelTab,
@@ -275,8 +277,85 @@ const AgentTraceView: Component<{ entries: DevToolsAgentTraceEntry[] }> = (
 const PageMapView: Component<{ snapshot: DevToolsPageMapSnapshot | null }> = (
   props,
 ) => {
+  const [query, setQuery] = createSignal("");
+  const [copiedId, setCopiedId] = createSignal<number | null>(null);
+  const [revealMessage, setRevealMessage] = createSignal("");
+  let copyTimer: ReturnType<typeof setTimeout> | undefined;
+  let revealTimer: ReturnType<typeof setTimeout> | undefined;
+
   const pageLabel = () =>
     props.snapshot?.title || props.snapshot?.pageUrl || "Active page";
+
+  // Filter elements by the query across label/selector/role/tag (case-insensitive).
+  const filteredElements = () => {
+    const snap = props.snapshot;
+    if (!snap) return [];
+    const q = query().trim().toLowerCase();
+    if (!q) return snap.elements;
+    return snap.elements.filter((el) => {
+      const haystack = [
+        el.label,
+        el.selector,
+        el.role,
+        el.tag,
+        el.type,
+        el.href,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  };
+
+  const flashCopied = (id: number) => {
+    setCopiedId(id);
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => setCopiedId(null), 1200);
+  };
+
+  const copySelector = (element: DevToolsPageMapElement) => {
+    navigator.clipboard?.writeText(element.selector).catch(() => {});
+    flashCopied(element.id);
+  };
+
+  // Maps the main-process reveal status to a human-facing message. Empty string
+  // means success (nothing to surface). A stale "not-found" is the common case
+  // worth telling the user about — the page may have changed since the snapshot.
+  const REVEAL_MESSAGES: Partial<Record<DevToolsPageMapRevealStatus, string>> = {
+    "not-found": "Element not found — the page may have changed since the last snapshot.",
+    "invalid-selector": "Could not locate this element (invalid selector).",
+    "no-active-tab": "No active tab to inspect.",
+  };
+
+  const reveal = async (selector: string) => {
+    if (!selector) return;
+    try {
+      const status = await window.vessel.devtoolsPanel.revealElement(selector);
+      const message = REVEAL_MESSAGES[status] ?? "";
+      setRevealMessage(message);
+      if (revealTimer) clearTimeout(revealTimer);
+      revealTimer = setTimeout(() => setRevealMessage(""), 3000);
+    } catch {
+      setRevealMessage("Could not reach the page to reveal this element.");
+      if (revealTimer) clearTimeout(revealTimer);
+      revealTimer = setTimeout(() => setRevealMessage(""), 3000);
+    }
+  };
+
+  const onRevealRowKeyDown = (
+    event: KeyboardEvent,
+    selector: string,
+  ) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    void reveal(selector);
+  };
+
+  onCleanup(() => {
+    if (copyTimer) clearTimeout(copyTimer);
+    if (revealTimer) clearTimeout(revealTimer);
+  });
 
   return (
     <Show
@@ -326,6 +405,23 @@ const PageMapView: Component<{ snapshot: DevToolsPageMapSnapshot | null }> = (
             </div>
           </Show>
 
+          <div class="page-map-filter-row">
+            <input
+              class="page-map-filter"
+              type="search"
+              placeholder="Filter by label, selector, role…"
+              value={query()}
+              onInput={(e) => setQuery(e.currentTarget.value)}
+            />
+            <span class="page-map-filter-count">
+              {filteredElements().length} / {snapshot().elements.length} shown
+            </span>
+          </div>
+
+          <Show when={revealMessage()}>
+            <div class="page-map-reveal-status">{revealMessage()}</div>
+          </Show>
+
           <Show
             when={snapshot().elements.length > 0}
             fallback={
@@ -336,13 +432,14 @@ const PageMapView: Component<{ snapshot: DevToolsPageMapSnapshot | null }> = (
           >
             <div class="page-map-elements">
               <div class="page-map-header">
+                <span>#</span>
                 <span>Element</span>
                 <span>Label</span>
                 <span>Selector</span>
-                <span>State</span>
+                <span>Status</span>
                 <span>Bounds</span>
               </div>
-              <For each={snapshot().elements}>
+              <For each={filteredElements()}>
                 {(element) => (
                   <div
                     class="page-map-row"
@@ -350,18 +447,48 @@ const PageMapView: Component<{ snapshot: DevToolsPageMapSnapshot | null }> = (
                       blocked: Boolean(element.issue),
                       ready: element.interactable,
                     }}
+                    onClick={() => void reveal(element.selector)}
+                    onKeyDown={(event) =>
+                      onRevealRowKeyDown(event, element.selector)}
+                    role="button"
+                    tabIndex={0}
+                    title="Reveal element on page"
                   >
+                    <span class="page-map-index">{element.id}</span>
                     <span class="page-map-element-tag">
-                      {element.role ?? element.tag}
+                      {element.tag}
+                      {element.role ? ` [${element.role}]` : ""}
                     </span>
                     <span class="page-map-element-label" title={element.label}>
                       {element.label}
+                      <Show when={element.type || element.href}>
+                        <span class="page-map-element-sub">
+                          {element.type ? `type=${element.type}` : ""}
+                          {element.href ? ` → ${element.href}` : ""}
+                        </span>
+                      </Show>
                     </span>
-                    <span
-                      class="page-map-element-selector"
-                      title={element.selector}
-                    >
-                      {element.selector}
+                    <span class="page-map-element-selector">
+                      <span class="page-map-selector-text" title={element.selector}>
+                        {element.selector}
+                      </span>
+                      <button
+                        class="page-map-copy-btn"
+                        classList={{ copied: copiedId() === element.id }}
+                        title="Copy selector"
+                        aria-label="Copy selector"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          copySelector(element);
+                        }}
+                      >
+                        <Show
+                          when={copiedId() === element.id}
+                          fallback={<Copy size={12} aria-hidden="true" />}
+                        >
+                          <Check size={12} aria-hidden="true" />
+                        </Show>
+                      </button>
                     </span>
                     <span
                       class={`page-map-element-state ${
@@ -374,8 +501,8 @@ const PageMapView: Component<{ snapshot: DevToolsPageMapSnapshot | null }> = (
                         : element.issue || (element.disabled ? "disabled" : "not ready")}
                     </span>
                     <span class="page-map-element-bounds">
-                      {Math.round(element.bounds.x)},{Math.round(element.bounds.y)}
-                      {" "}
+                      {Math.round(element.bounds.x)},{Math.round(element.bounds.y)}{" "}
+                      •{" "}
                       {Math.round(element.bounds.width)}x
                       {Math.round(element.bounds.height)}
                     </span>

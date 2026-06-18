@@ -46,6 +46,7 @@ import {
   enableCaptureForTab,
   refreshDevToolsPageMap,
 } from "../devtools/tools";
+import { revealPageMapElement } from "../devtools/page-map-reveal";
 import { isSidebarAttached } from "../sidebar-panel";
 import {
   createKitFromText,
@@ -61,6 +62,9 @@ const KitIdSchema = z.string().min(1);
 const SkillSourceSchema = z.string().min(1).max(100_000);
 const OriginSchema = z.string().min(1);
 const DevToolsHeightSchema = z.number().finite().min(0).max(2000);
+const DevToolsPageMapRevealSchema = z.object({
+  selector: z.string().min(1),
+});
 const DevToolsPanelTabSchema = z.enum([
   "console",
   "network",
@@ -218,6 +222,19 @@ export function registerSystemHandlers(
     }
     return await refreshDevToolsPageMap(tabManager);
   });
+
+  ipcMain.handle(
+    Channels.DEVTOOLS_PAGE_MAP_REVEAL,
+    async (event, payload: unknown) => {
+      assertTrustedIpcSender(event);
+      const { selector } = parseIpc(
+        DevToolsPageMapRevealSchema,
+        payload,
+        "payload",
+      );
+      return await revealPageMapElement(tabManager, selector);
+    },
+  );
 
   ipcMain.handle(Channels.DEVTOOLS_PANEL_HOST_STATE_GET, (event) => {
     assertTrustedIpcSender(event);

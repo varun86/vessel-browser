@@ -120,6 +120,12 @@ export interface DevToolsPageMapSnapshot {
   accessIssues: string[];
 }
 
+export type DevToolsPageMapRevealStatus =
+  | "revealed"
+  | "not-found"
+  | "invalid-selector"
+  | "no-active-tab";
+
 export interface DevToolsPanelState {
   console: ConsoleEntry[];
   network: NetworkEntry[];

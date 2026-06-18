@@ -39,6 +39,7 @@ import type {
 } from "../shared/page-diff-types";
 import type {
   DevToolsPanelHostState,
+  DevToolsPageMapRevealStatus,
   DevToolsPanelState,
   DevToolsPanelTab,
 } from "../shared/devtools-types";
@@ -498,6 +499,8 @@ const api = {
       ipcRenderer.invoke(Channels.DEVTOOLS_PANEL_STATE_GET),
     getHostState: (): Promise<DevToolsPanelHostState> =>
       ipcRenderer.invoke(Channels.DEVTOOLS_PANEL_HOST_STATE_GET),
+    revealElement: (selector: string): Promise<DevToolsPageMapRevealStatus> =>
+      ipcRenderer.invoke(Channels.DEVTOOLS_PAGE_MAP_REVEAL, { selector }),
     onStateUpdate: (cb: (state: DevToolsPanelState) => void): (() => void) => {
       const handler = (_: unknown, state: DevToolsPanelState) => cb(state);
       ipcRenderer.on(Channels.DEVTOOLS_PANEL_STATE, handler);

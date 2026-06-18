@@ -12,4 +12,5 @@ export const DevToolsChannels = {
   DEVTOOLS_PANEL_DOCK: "devtools-panel:dock",
   DEVTOOLS_PANEL_HOST_STATE_GET: "devtools-panel:host-state-get",
   DEVTOOLS_PANEL_HOST_STATE: "devtools-panel:host-state",
+  DEVTOOLS_PAGE_MAP_REVEAL: "devtools-panel:page-map:reveal",
 } as const;
