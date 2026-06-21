@@ -49,7 +49,8 @@
     "test:navigation-regression": "env -u ELECTRON_RUN_AS_NODE ELECTRON_DISABLE_SANDBOX=1 electron --no-sandbox --disable-setuid-sandbox scripts/run-navigation-regression.mjs",
     "test:mcp-proxy": "node scripts/test-mcp-stdio-proxy.mjs",
     "smoke:test": "node scripts/smoke-test.mjs",
-    "test:coverage": "NODE_OPTIONS=\"--require ./tests/mocks/register.cjs --import ./tests/mocks/esm-register.mjs\" c8 --reporter=text --reporter=html tsx --test tests/*.test.ts"
+    "test:coverage": "NODE_OPTIONS=\"--require ./tests/mocks/register.cjs --import ./tests/mocks/esm-register.mjs\" c8 --reporter=text --reporter=html tsx --test tests/*.test.ts",
+    "prepare": "husky"
   },
   "keywords": [
     "agent-browser",
@@ -73,7 +74,7 @@
     "url": "https://github.com/unmodeled-tyler/vessel-browser.git"
   },
   "engines": {
-    "node": ">=22.12.0",
+    "node": ">=22.22.1",
     "npm": ">=11.0.0"
   },
   "packageManager": "npm@11.16.0",
@@ -89,7 +90,9 @@
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
     "knip": "^6.14.2",
+    "lint-staged": "^17.0.8",
     "lucide-solid": "^1.17.0",
     "prettier": "^3.8.3",
     "solid-js": "^1.9.13",
@@ -112,5 +115,9 @@
     "esbuild@0.25.12": true,
     "esbuild@0.27.7": true,
     "esbuild@0.28.1": true
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": "eslint --config eslint.config.mjs --fix",
+    "*.{ts,tsx,mjs,json}": "prettier --write"
   }
 }
