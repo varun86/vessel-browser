@@ -10,11 +10,21 @@ import type {
 import type { TabManager } from "../tabs/tab-manager";
 import { createLogger } from "../../shared/logger";
 import { ensureDir, readIfExists, unlinkIfExists, writeFileAtomic } from "../utils/safe-fs";
+import { createEncryptDecrypt } from "../vault/shared";
 
 const logger = createLogger("Sessions");
 import { waitForLoad } from "../utils/webcontents-utils";
 
 const SESSION_VERSION = 1;
+const ENCRYPTED_SESSION_FORMAT = "vessel:named-session:v2";
+const SESSION_KEY_FILENAME = "vessel-named-sessions.key";
+
+const sessionCrypto = createEncryptDecrypt(SESSION_KEY_FILENAME);
+
+interface EncryptedSessionFile {
+  format: typeof ENCRYPTED_SESSION_FORMAT;
+  payload: string;
+}
 
 function getSessionsDir(): string {
   return path.join(app.getPath("userData"), "named-sessions");
@@ -50,8 +60,43 @@ async function getSessionPath(name: string): Promise<string> {
   return path.join(dir, sessionFileName(name));
 }
 
+function isEncryptedSessionFile(value: unknown): value is EncryptedSessionFile {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (value as { format?: unknown }).format === ENCRYPTED_SESSION_FORMAT &&
+    typeof (value as { payload?: unknown }).payload === "string"
+  );
+}
+
+function encodeSessionFile(data: NamedSessionData): string {
+  const plaintext = JSON.stringify({ version: SESSION_VERSION, ...data });
+  const encrypted = sessionCrypto.encrypt(plaintext);
+  return JSON.stringify(
+    {
+      format: ENCRYPTED_SESSION_FORMAT,
+      payload: encrypted.toString("base64"),
+    },
+    null,
+    2,
+  );
+}
+
+function decodeSessionFile(raw: string): NamedSessionData | null {
+  const parsed = JSON.parse(raw) as unknown;
+  if (isEncryptedSessionFile(parsed)) {
+    const decrypted = sessionCrypto.decrypt(Buffer.from(parsed.payload, "base64"));
+    return parseSessionData(JSON.parse(decrypted) as Partial<NamedSessionData> & {
+      version?: number;
+    });
+  }
+  return parseSessionData(parsed as Partial<NamedSessionData> & {
+    version?: number;
+  });
+}
+
 async function writeSessionFile(filePath: string, data: NamedSessionData): Promise<void> {
-  const payload = JSON.stringify({ version: SESSION_VERSION, ...data }, null, 2);
+  const payload = encodeSessionFile(data);
   await writeFileAtomic(filePath, payload, { mode: 0o600 });
 }
 
@@ -59,9 +104,7 @@ async function readSessionFile(filePath: string): Promise<NamedSessionData | nul
   const raw = await readIfExists(filePath, "utf-8");
   if (raw == null) return null;
   try {
-    return parseSessionData(JSON.parse(raw) as Partial<NamedSessionData> & {
-      version?: number;
-    });
+    return decodeSessionFile(raw);
   } catch (err) {
     logger.warn(`Failed to read session file ${filePath}:`, err);
     return null;

@@ -63,6 +63,10 @@ function WebContentsView(opts) {
 
 function createMockSession() {
   return {
+    cookies: {
+      get: () => Promise.resolve([]),
+      set: () => Promise.resolve(),
+    },
     setUserAgent: () => {},
     getUserAgent: () => "Vessel Test",
     setCertificateVerifyProc: () => {},
