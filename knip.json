@@ -4,10 +4,12 @@
     "src/preload/index.ts",
     "src/preload/content-script.ts",
     "src/renderer/src/index.tsx",
+    ".husky/*",
     "scripts/**/*.{js,mjs}",
     "tests/**/*.ts"
   ],
   "project": [
+    ".husky/*",
     "bin/**/*.js",
     "scripts/**/*.{js,mjs}",
     "src/**/*.{ts,tsx}",
@@ -17,7 +19,13 @@
     "src/main/telemetry/trace-logger.ts",
     "src/renderer/src/env.d.ts"
   ],
+  "ignoreDependencies": [
+    "husky",
+    "lint-staged"
+  ],
   "ignoreBinaries": [
+    "husky",
+    "lint-staged",
     "scripts/build-macos-icon.sh",
     "scripts/verify-macos-universal.sh"
   ],
