@@ -1,6 +1,7 @@
 import { ipcMain } from "electron";
 import { z } from "zod";
 import { Channels } from "../../shared/channels";
+import { TAB_GROUP_COLORS, type TabGroupColor } from "../../shared/types";
 import { loadSettings } from "../config/settings";
 import { layoutViews, type WindowState } from "../window";
 import { assertTrustedIpcSender, parseIpc, type SendToRendererViews } from "./common";
@@ -12,7 +13,13 @@ import { createSecondaryWindow } from "../secondary/window";
 const TabIdSchema = z.string().min(1);
 const GroupIdSchema = z.string().min(1);
 const UrlSchema = z.string().min(1);
-const ColorSchema = z.string().min(1);
+const NavigationPostBodySchema = z.record(z.string(), z.string()).optional();
+const ColorSchema = z.custom<TabGroupColor>(
+  (color) =>
+    typeof color === "string" &&
+    TAB_GROUP_COLORS.includes(color as TabGroupColor),
+  { message: "Invalid tab group color" },
+);
 const FindActionSchema = z.enum(["clearSelection", "keepSelection", "activateSelection"]);
 const FindTextSchema = z.string().min(1).max(10_000);
 const FindOptionsSchema = z
@@ -71,7 +78,12 @@ export function registerTabHandlers(
       assertTrustedIpcSender(event);
       const validatedId = parseIpc(TabIdSchema, id, "tabId");
       const validatedUrl = parseIpc(UrlSchema, url, "url");
-      return tabManager.navigateTab(validatedId, validatedUrl, postBody);
+      const validatedPostBody = parseIpc(
+        NavigationPostBodySchema,
+        postBody,
+        "postBody",
+      );
+      return tabManager.navigateTab(validatedId, validatedUrl, validatedPostBody);
     },
   );
 

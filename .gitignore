@@ -99,6 +99,7 @@ tests/*.test.ts
 !tests/settings-ipc-security.test.ts
 !tests/structured-data.test.ts
 !tests/summary-context.test.ts
+!tests/tabs-ipc-contract.test.ts
 !tests/tool-guardrails.test.ts
 tests/local/
 tests/*.local.ts
