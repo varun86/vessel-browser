@@ -4,8 +4,8 @@ import { Channels } from "../../shared/channels";
 import {
   getRendererSettings,
   parseSettingValue,
+  RENDERER_SETTABLE_KEYS,
   setSetting,
-  SETTABLE_KEYS,
 } from "../config/settings";
 import { getRuntimeHealth } from "../health/runtime-health";
 import { trackSettingChanged } from "../telemetry/posthog";
@@ -22,7 +22,7 @@ import type { AgentRuntime } from "../agent/runtime";
 import type { TabManager } from "../tabs/tab-manager";
 import type { ResearchOrchestrator } from "../agent/research/orchestrator";
 
-const SettingsKeySchema = z.string().refine((k) => SETTABLE_KEYS.has(k), {
+const SettingsKeySchema = z.string().refine((k) => RENDERER_SETTABLE_KEYS.has(k), {
   message: "Unknown setting key",
 });
 
