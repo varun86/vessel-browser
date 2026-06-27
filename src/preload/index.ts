@@ -30,6 +30,8 @@ import type {
   UpdateCheckResult,
   TabGroupColor,
   TabState,
+  RendererSettableSettingKey,
+  RendererSettableSettings,
   VesselSettings,
 } from "../shared/types";
 import type { AutofillProfile, AutofillResult } from "../shared/autofill-types";
@@ -48,46 +50,81 @@ import type {
   ResearchState,
 } from "../shared/research-types";
 
+type TabId = TabState["id"];
+type TabGroupId = NonNullable<TabState["groupId"]>;
+type TabNavigationPostBody = Record<string, string>;
+type FindInPageOptions = {
+  forward?: boolean;
+  findNext?: boolean;
+};
+type FindInPageStopAction =
+  | "clearSelection"
+  | "keepSelection"
+  | "activateSelection";
+type FindInPageResult = {
+  requestId: number;
+  activeMatchOrdinal: number;
+  matches: number;
+  finalUpdate: boolean;
+};
+
 const api = {
   tabs: {
-    create: (url?: string) => ipcRenderer.invoke(Channels.TAB_CREATE, url),
-    close: (id: string) => ipcRenderer.invoke(Channels.TAB_CLOSE, id),
-    switch: (id: string) => ipcRenderer.invoke(Channels.TAB_SWITCH, id),
-    navigate: (id: string, url: string, postBody?: Record<string, string>) =>
+    create: (url?: string): Promise<TabId> =>
+      ipcRenderer.invoke(Channels.TAB_CREATE, url),
+    close: (id: TabId): Promise<void> =>
+      ipcRenderer.invoke(Channels.TAB_CLOSE, id),
+    switch: (id: TabId): Promise<void> =>
+      ipcRenderer.invoke(Channels.TAB_SWITCH, id),
+    navigate: (
+      id: TabId,
+      url: string,
+      postBody?: TabNavigationPostBody,
+    ): Promise<void> =>
       ipcRenderer.invoke(Channels.TAB_NAVIGATE, id, url, postBody),
-    back: (id: string) => ipcRenderer.invoke(Channels.TAB_BACK, id),
-    forward: (id: string) => ipcRenderer.invoke(Channels.TAB_FORWARD, id),
-    reload: (id: string) => ipcRenderer.invoke(Channels.TAB_RELOAD, id),
-    toggleAdBlock: (id: string): Promise<boolean | null> =>
+    back: (id: TabId): Promise<void> => ipcRenderer.invoke(Channels.TAB_BACK, id),
+    forward: (id: TabId): Promise<void> =>
+      ipcRenderer.invoke(Channels.TAB_FORWARD, id),
+    reload: (id: TabId): Promise<void> =>
+      ipcRenderer.invoke(Channels.TAB_RELOAD, id),
+    toggleAdBlock: (id: TabId): Promise<boolean | null> =>
       ipcRenderer.invoke(Channels.TAB_TOGGLE_AD_BLOCK, id),
-    zoomIn: (id: string) => ipcRenderer.invoke(Channels.TAB_ZOOM_IN, id),
-    zoomOut: (id: string) => ipcRenderer.invoke(Channels.TAB_ZOOM_OUT, id),
-    zoomReset: (id: string) => ipcRenderer.invoke(Channels.TAB_ZOOM_RESET, id),
-    reopenClosed: () => ipcRenderer.invoke(Channels.TAB_REOPEN_CLOSED),
-    duplicate: (id: string) => ipcRenderer.invoke(Channels.TAB_DUPLICATE, id),
-    showContextMenu: (id: string) => ipcRenderer.send(Channels.TAB_CONTEXT_MENU, id),
-    openPrivateWindow: () => ipcRenderer.invoke(Channels.OPEN_PRIVATE_WINDOW),
+    zoomIn: (id: TabId): Promise<void> =>
+      ipcRenderer.invoke(Channels.TAB_ZOOM_IN, id),
+    zoomOut: (id: TabId): Promise<void> =>
+      ipcRenderer.invoke(Channels.TAB_ZOOM_OUT, id),
+    zoomReset: (id: TabId): Promise<void> =>
+      ipcRenderer.invoke(Channels.TAB_ZOOM_RESET, id),
+    reopenClosed: (): Promise<TabId | null> =>
+      ipcRenderer.invoke(Channels.TAB_REOPEN_CLOSED),
+    duplicate: (id: TabId): Promise<TabId | null> =>
+      ipcRenderer.invoke(Channels.TAB_DUPLICATE, id),
+    showContextMenu: (id: TabId): void =>
+      ipcRenderer.send(Channels.TAB_CONTEXT_MENU, id),
+    openPrivateWindow: (): Promise<void> =>
+      ipcRenderer.invoke(Channels.OPEN_PRIVATE_WINDOW),
     isPrivateMode: (): Promise<boolean> => ipcRenderer.invoke(Channels.IS_PRIVATE_MODE),
-    pin: (id: string) => ipcRenderer.invoke(Channels.TAB_PIN, id),
-    unpin: (id: string) => ipcRenderer.invoke(Channels.TAB_UNPIN, id),
-    createGroup: (id: string): Promise<string | null> =>
+    pin: (id: TabId): Promise<void> => ipcRenderer.invoke(Channels.TAB_PIN, id),
+    unpin: (id: TabId): Promise<void> =>
+      ipcRenderer.invoke(Channels.TAB_UNPIN, id),
+    createGroup: (id: TabId): Promise<TabGroupId | null> =>
       ipcRenderer.invoke(Channels.TAB_GROUP_CREATE, id),
-    addToGroup: (id: string, groupId: string) =>
+    addToGroup: (id: TabId, groupId: TabGroupId): Promise<void> =>
       ipcRenderer.invoke(Channels.TAB_GROUP_ADD_TAB, id, groupId),
-    removeFromGroup: (id: string) =>
+    removeFromGroup: (id: TabId): Promise<void> =>
       ipcRenderer.invoke(Channels.TAB_GROUP_REMOVE_TAB, id),
-    toggleGroupCollapsed: (groupId: string): Promise<boolean | null> =>
+    toggleGroupCollapsed: (groupId: TabGroupId): Promise<boolean | null> =>
       ipcRenderer.invoke(Channels.TAB_GROUP_TOGGLE_COLLAPSED, groupId),
-    setGroupColor: (groupId: string, color: TabGroupColor) =>
+    setGroupColor: (groupId: TabGroupId, color: TabGroupColor): Promise<void> =>
       ipcRenderer.invoke(Channels.TAB_GROUP_SET_COLOR, groupId, color),
-    showGroupContextMenu: (groupId: string) =>
+    showGroupContextMenu: (groupId: TabGroupId): void =>
       ipcRenderer.send(Channels.TAB_GROUP_CONTEXT_MENU, groupId),
-    toggleMute: (id: string): Promise<boolean | null> =>
+    toggleMute: (id: TabId): Promise<boolean | null> =>
       ipcRenderer.invoke(Channels.TAB_TOGGLE_MUTE, id),
-    print: (id: string) => ipcRenderer.invoke(Channels.TAB_PRINT, id),
-    printToPdf: (id: string): Promise<string | null> =>
+    print: (id: TabId): Promise<void> => ipcRenderer.invoke(Channels.TAB_PRINT, id),
+    printToPdf: (id: TabId): Promise<string | null> =>
       ipcRenderer.invoke(Channels.TAB_PRINT_TO_PDF, id),
-    openNewWindow: () => ipcRenderer.invoke(Channels.OPEN_NEW_WINDOW),
+    openNewWindow: (): Promise<void> => ipcRenderer.invoke(Channels.OPEN_NEW_WINDOW),
     getState: (): Promise<{ tabs: TabState[]; activeId: string }> =>
       ipcRenderer.invoke(Channels.TAB_STATE_GET),
     onStateUpdate: (
@@ -377,7 +414,10 @@ const api = {
       return () =>
         ipcRenderer.removeListener(Channels.SETTINGS_HEALTH_UPDATE, handler);
     },
-    set: (key: string, value: unknown) =>
+    set: <K extends RendererSettableSettingKey>(
+      key: K,
+      value: RendererSettableSettings[K],
+    ): Promise<VesselSettings> =>
       ipcRenderer.invoke(Channels.SETTINGS_SET, key, value),
     onUpdate: (cb: (settings: VesselSettings) => void): (() => void) => {
       const handler = (_: unknown, settings: VesselSettings) => cb(settings);
@@ -523,16 +563,16 @@ const api = {
     },
   },
   find: {
-    start: (text: string, options?: { forward?: boolean; findNext?: boolean }) =>
+    start: (text: string, options?: FindInPageOptions): Promise<void> =>
       ipcRenderer.invoke(Channels.FIND_IN_PAGE_START, text, options),
-    next: (forward?: boolean) =>
+    next: (forward?: boolean): Promise<void> =>
       ipcRenderer.invoke(Channels.FIND_IN_PAGE_NEXT, forward),
-    stop: (action?: "clearSelection" | "keepSelection" | "activateSelection") =>
+    stop: (action?: FindInPageStopAction): Promise<void> =>
       ipcRenderer.invoke(Channels.FIND_IN_PAGE_STOP, action),
     onResult: (
-      cb: (result: { requestId: number; activeMatchOrdinal: number; matches: number; finalUpdate: boolean }) => void,
+      cb: (result: FindInPageResult) => void,
     ): (() => void) => {
-      const handler = (_: unknown, result: { requestId: number; activeMatchOrdinal: number; matches: number; finalUpdate: boolean }) => cb(result);
+      const handler = (_: unknown, result: FindInPageResult) => cb(result);
       ipcRenderer.on(Channels.FIND_IN_PAGE_RESULT, handler);
       return () =>
         ipcRenderer.removeListener(Channels.FIND_IN_PAGE_RESULT, handler);

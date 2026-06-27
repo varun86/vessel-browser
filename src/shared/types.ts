@@ -631,6 +631,10 @@ export interface VesselSettings {
   defaultSearchEngine: SearchEngineId;
 }
 
+export type InternalSettingKey = "premium";
+export type RendererSettableSettings = Omit<VesselSettings, InternalSettingKey>;
+export type RendererSettableSettingKey = keyof RendererSettableSettings;
+
 export type RuntimeHealthSeverity = "warning" | "error";
 
 export interface RuntimeHealthIssue {

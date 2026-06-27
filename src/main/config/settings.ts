@@ -4,7 +4,9 @@ import fs from "fs";
 import { z } from "zod";
 import type {
   CodexOAuthTokens,
+  InternalSettingKey,
   ProviderConfig,
+  RendererSettableSettingKey,
   ReasoningEffortLevel,
   RuntimeHealthIssue,
   VesselSettings,
@@ -60,8 +62,17 @@ const CHAT_PROVIDER_SECRET_FILENAME = "vessel-chat-provider-secret";
 const CODEX_TOKENS_FILENAME = "vessel-codex-tokens";
 const logger = createLogger("Settings");
 
-/** Allowlist of setting keys accepted via IPC. */
-export const SETTABLE_KEYS: ReadonlySet<string> = new Set(Object.keys(defaults));
+const INTERNAL_SETTING_KEYS: ReadonlySet<InternalSettingKey> = new Set([
+  "premium",
+]);
+
+/** Allowlist of setting keys accepted from renderer settings IPC. */
+export const RENDERER_SETTABLE_KEYS: ReadonlySet<RendererSettableSettingKey> = new Set(
+  Object.keys(defaults).filter(
+    (key): key is RendererSettableSettingKey =>
+      !INTERNAL_SETTING_KEYS.has(key as InternalSettingKey),
+  ),
+);
 
 const SettingsValueSchemas: Record<keyof VesselSettings, z.ZodType> = {
   defaultUrl: z.string().url(),

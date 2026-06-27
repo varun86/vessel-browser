@@ -4,8 +4,8 @@ import { Channels } from "../../shared/channels";
 import {
   getRendererSettings,
   parseSettingValue,
+  RENDERER_SETTABLE_KEYS,
   setSetting,
-  SETTABLE_KEYS,
 } from "../config/settings";
 import { getRuntimeHealth } from "../health/runtime-health";
 import { trackSettingChanged } from "../telemetry/posthog";
@@ -17,14 +17,21 @@ import {
   parseIpc,
   type SendToRendererViews,
 } from "./common";
-import type { VesselSettings, ApprovalMode } from "../../shared/types";
+import type {
+  ApprovalMode,
+  RendererSettableSettingKey,
+  VesselSettings,
+} from "../../shared/types";
 import type { AgentRuntime } from "../agent/runtime";
 import type { TabManager } from "../tabs/tab-manager";
 import type { ResearchOrchestrator } from "../agent/research/orchestrator";
 
-const SettingsKeySchema = z.string().refine((k) => SETTABLE_KEYS.has(k), {
-  message: "Unknown setting key",
-});
+const SettingsKeySchema = z.custom<RendererSettableSettingKey>(
+  (key) =>
+    typeof key === "string" &&
+    RENDERER_SETTABLE_KEYS.has(key as RendererSettableSettingKey),
+  { message: "Unknown setting key" },
+);
 
 export function registerSettingsHandlers(
   tabManager: TabManager,
@@ -86,8 +93,7 @@ export function registerSettingsHandlers(
 
   ipcMain.handle(Channels.SETTINGS_SET, async (event, key: unknown, value: unknown) => {
     assertTrustedIpcSender(event);
-    const validatedKey = parseIpc(SettingsKeySchema, key, "key");
-    const settingsKey = validatedKey as keyof VesselSettings;
+    const settingsKey = parseIpc(SettingsKeySchema, key, "key");
     const validatedValue = parseSettingValue(settingsKey, value);
     return applySettingChange(settingsKey, validatedValue);
   });
