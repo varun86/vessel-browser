@@ -77,6 +77,7 @@ tests/*.test.ts
 !tests/highlight-actions.test.ts
 !tests/input-coercion.test.ts
 !tests/link-validation.test.ts
+!tests/mcp-group-tools.test.ts
 !tests/overlay-context.test.ts
 !tests/page-access-issues.test.ts
 !tests/page-diff-display.test.ts

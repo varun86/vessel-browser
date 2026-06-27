@@ -1,9 +1,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { TabGroupColor } from "../../../shared/types";
+import { TAB_GROUP_COLORS, type TabGroupColor } from "../../../shared/types";
 import type { AgentRuntime } from "../../agent/runtime";
 import type { TabManager } from "../../tabs/tab-manager";
 import { asTextResponse, withAction } from "../mcp-helpers";
+
+const TAB_GROUP_COLOR_SET = new Set<string>(TAB_GROUP_COLORS);
+const TabGroupColorSchema = z.custom<TabGroupColor>(
+  (color) => typeof color === "string" && TAB_GROUP_COLOR_SET.has(color),
+  { message: "Invalid tab group color" },
+);
 
 export function registerGroupTools(
   server: McpServer,
@@ -43,10 +49,7 @@ export function registerGroupTools(
           .optional()
           .describe("Tab ID to group (defaults to active tab)"),
         name: z.string().optional().describe("Optional group name"),
-        color: z
-          .enum(["blue", "green", "yellow", "orange", "red", "purple", "gray"])
-          .optional()
-          .describe("Optional group color"),
+        color: TabGroupColorSchema.optional().describe("Optional group color"),
       },
     },
     async ({ tabId, name, color }) =>
@@ -140,14 +143,16 @@ export function registerGroupTools(
       description: "Change the color of a tab group.",
       inputSchema: {
         groupId: z.string().describe("Group ID"),
-        color: z
-          .enum(["blue", "green", "yellow", "orange", "red", "purple", "gray"])
-          .describe("New color"),
+        color: TabGroupColorSchema.describe("New color"),
       },
     },
     async ({ groupId, color }) =>
       withAction(runtime, tabManager, "set_group_color", { groupId, color }, async () => {
-        tabManager.setGroupColor(groupId, color as TabGroupColor);
+        const groupExists = tabManager.getGroups().some((group) => group.id === groupId);
+        if (!groupExists) {
+          return "Error: Group not found";
+        }
+        tabManager.setGroupColor(groupId, color);
         return `Set group ${groupId} color to ${color}`;
       }),
   );
