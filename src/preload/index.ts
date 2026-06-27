@@ -30,6 +30,8 @@ import type {
   UpdateCheckResult,
   TabGroupColor,
   TabState,
+  RendererSettableSettingKey,
+  RendererSettableSettings,
   VesselSettings,
 } from "../shared/types";
 import type { AutofillProfile, AutofillResult } from "../shared/autofill-types";
@@ -377,7 +379,10 @@ const api = {
       return () =>
         ipcRenderer.removeListener(Channels.SETTINGS_HEALTH_UPDATE, handler);
     },
-    set: (key: string, value: unknown) =>
+    set: <K extends RendererSettableSettingKey>(
+      key: K,
+      value: RendererSettableSettings[K],
+    ): Promise<VesselSettings> =>
       ipcRenderer.invoke(Channels.SETTINGS_SET, key, value),
     onUpdate: (cb: (settings: VesselSettings) => void): (() => void) => {
       const handler = (_: unknown, settings: VesselSettings) => cb(settings);
