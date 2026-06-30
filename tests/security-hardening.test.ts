@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { session } from "electron";
+import { app, safeStorage, session } from "electron";
 
 import {
   assertTrustedIpcSender,
@@ -28,6 +29,14 @@ import {
   createCodexFunctionCallOutput,
 } from "../src/main/ai/provider-codex";
 import { flushPersist, setSetting } from "../src/main/config/settings";
+import {
+  createDebouncedJsonPersistence,
+  loadJsonFile,
+} from "../src/main/persistence/json-file";
+import {
+  getNamedSession,
+  saveNamedSession,
+} from "../src/main/sessions/manager";
 import { requiresExplicitMcpApproval } from "../src/main/mcp/server";
 import {
   assertFeatureUnlocked,
@@ -48,9 +57,18 @@ import {
   encodeEncryptionKeyForStorage,
   normalizeCredentialHost,
 } from "../src/main/vault/shared";
-import type { PremiumState, PremiumStatus } from "../src/shared/types";
+import type { TabManager } from "../src/main/tabs/tab-manager";
+import type {
+  NamedSessionData,
+  PremiumState,
+  PremiumStatus,
+} from "../src/shared/types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const mockSafeStorage = safeStorage as typeof safeStorage & {
+  __setEncryptionAvailable?: (value: boolean) => void;
+};
 
 function setPremiumStatusForTest(
   status: PremiumStatus,
@@ -65,6 +83,33 @@ function setPremiumStatusForTest(
     expiresAt: "",
   };
   setSetting("premium", state);
+}
+
+function namedSessionPath(name: string): string {
+  const normalized = name.trim().toLowerCase();
+  const slug =
+    normalized
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "session";
+  const hash = createHash("sha256").update(normalized).digest("hex").slice(0, 8);
+  return path.join(app.getPath("userData"), "named-sessions", `${slug}-${hash}.json`);
+}
+
+function emptyTabManagerForSessionTest(): TabManager {
+  return {
+    getAllStates: () => [],
+    snapshotSession: (_label: string) => ({
+      tabs: [],
+      activeIndex: 0,
+      capturedAt: "2026-01-01T00:00:00.000Z",
+    }),
+  } as unknown as TabManager;
+}
+
+function setSafeStorageAvailabilityForTest(value: boolean): void {
+  assert.equal(typeof mockSafeStorage.__setEncryptionAvailable, "function");
+  mockSafeStorage.__setEncryptionAvailable(value);
 }
 
 async function withMockFetch<T>(
@@ -191,6 +236,102 @@ test("credential wildcard patterns only match subdomains", () => {
   assert.equal(domainMatches("*.example.com", "login.example.com"), true);
   assert.equal(domainMatches("*.example.com", "example.com"), false);
   assert.equal(domainMatches("example.com", "login.example.com"), false);
+});
+
+test("named sessions persist encrypted envelopes and migrate legacy plaintext", async (t) => {
+  const sessionsDir = path.join(app.getPath("userData"), "named-sessions");
+  fs.rmSync(sessionsDir, { recursive: true, force: true });
+  t.after(() => {
+    fs.rmSync(sessionsDir, { recursive: true, force: true });
+  });
+
+  const legacy: NamedSessionData = {
+    name: "alpha",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    cookieCount: 1,
+    originCount: 1,
+    domains: ["example.com"],
+    cookies: [
+      {
+        name: "sid",
+        value: "session-token",
+        domain: "example.com",
+        path: "/",
+        secure: true,
+        httpOnly: true,
+        session: false,
+        sameSite: "lax",
+      },
+    ],
+    localStorage: [
+      { origin: "https://example.com", entries: { token: "local-token" } },
+    ],
+    snapshot: { tabs: [], activeIndex: 0, capturedAt: "2026-01-01T00:00:00.000Z" },
+  };
+
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(
+    namedSessionPath("alpha"),
+    JSON.stringify({ version: 1, ...legacy }),
+    "utf-8",
+  );
+
+  const loaded = await getNamedSession("alpha");
+  assert.equal(loaded?.cookies[0]?.value, "session-token");
+  assert.equal(loaded?.localStorage[0]?.entries.token, "local-token");
+
+  const migratedRaw = fs.readFileSync(namedSessionPath("alpha"), "utf-8");
+  assert.match(migratedRaw, /"format"\s*:\s*"vessel:named-session:v2"/);
+  assert.doesNotMatch(migratedRaw, /session-token/);
+  assert.doesNotMatch(migratedRaw, /local-token/);
+  assert.doesNotMatch(migratedRaw, /"cookies"/);
+
+  await saveNamedSession(emptyTabManagerForSessionTest(), "beta");
+  const savedRaw = fs.readFileSync(namedSessionPath("beta"), "utf-8");
+  assert.match(savedRaw, /"format"\s*:\s*"vessel:named-session:v2"/);
+  assert.doesNotMatch(savedRaw, /"name"\s*:\s*"beta"/);
+  assert.doesNotMatch(savedRaw, /"cookies"/);
+  assert.equal((await getNamedSession("beta"))?.name, "beta");
+});
+
+test("secure JSON persistence fails closed without OS secret storage", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vessel-secure-persist-"));
+  const filePath = path.join(dir, "secure.json");
+  t.after(() => {
+    setSafeStorageAvailabilityForTest(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  fs.writeFileSync(filePath, JSON.stringify({ secret: true }), "utf-8");
+  setSafeStorageAvailabilityForTest(false);
+
+  assert.throws(
+    () =>
+      loadJsonFile({
+        filePath,
+        fallback: { secret: false },
+        parse: (raw) => raw as { secret: boolean },
+        secure: true,
+      }),
+    /Secure persistence requires OS-backed secret storage/,
+  );
+
+  fs.rmSync(filePath, { force: true });
+  const persist = createDebouncedJsonPersistence({
+    debounceMs: 10,
+    filePath,
+    getValue: () => ({ secret: "do-not-store-plaintext" }),
+    logLabel: "secure persistence test",
+    secure: true,
+  });
+
+  persist.schedule();
+  await assert.rejects(
+    () => persist.flush(),
+    /Secure persistence requires OS-backed secret storage/,
+  );
+  assert.equal(fs.existsSync(filePath), false);
 });
 
 test("external opener blocks unexpected schemes and hosts", async () => {

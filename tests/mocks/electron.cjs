@@ -2,6 +2,7 @@ const os = require("os");
 const path = require("path");
 
 let wcId = 0;
+let encryptionAvailable = true;
 
 function createMockWebContents() {
   wcId += 1;
@@ -62,14 +63,47 @@ function WebContentsView(opts) {
 }
 
 function createMockSession() {
+  const cookieStore = [];
   return {
     setUserAgent: () => {},
     getUserAgent: () => "Vessel Test",
     setCertificateVerifyProc: () => {},
     webRequest: { onBeforeRequest: () => {} },
     on: () => {},
-    clearStorageData: () => Promise.resolve(),
+    clearStorageData: () => {
+      cookieStore.length = 0;
+      return Promise.resolve();
+    },
     clearCache: () => Promise.resolve(),
+    cookies: {
+      get: () => Promise.resolve(cookieStore.slice()),
+      set: (details) => {
+        const next = {
+          name: details.name,
+          value: details.value,
+          domain: details.domain || new URL(details.url).hostname,
+          path: details.path || "/",
+          secure: !!details.secure,
+          httpOnly: !!details.httpOnly,
+          session: details.expirationDate == null,
+          expirationDate: details.expirationDate,
+          sameSite: details.sameSite,
+          url: details.url,
+        };
+        const index = cookieStore.findIndex(
+          (cookie) =>
+            cookie.name === next.name &&
+            cookie.domain === next.domain &&
+            cookie.path === next.path,
+        );
+        if (index >= 0) {
+          cookieStore[index] = next;
+        } else {
+          cookieStore.push(next);
+        }
+        return Promise.resolve();
+      },
+    },
   };
 }
 
@@ -83,9 +117,12 @@ module.exports = {
     getAppPath: () => process.cwd(),
   },
   safeStorage: {
-    isEncryptionAvailable: () => true,
+    isEncryptionAvailable: () => encryptionAvailable,
     encryptString: (str) => Buffer.from(str, "utf-8"),
     decryptString: (buf) => buf.toString("utf-8"),
+    __setEncryptionAvailable: (value) => {
+      encryptionAvailable = !!value;
+    },
   },
   BaseWindow: class BaseWindow {
     constructor() {
