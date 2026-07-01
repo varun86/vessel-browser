@@ -8,9 +8,10 @@ import { createLogger } from "../../shared/logger";
 import { getEffectiveMaxIterations } from "../premium/manager";
 import { TERMINAL_TOOL_RESULT } from "./tool-control";
 import {
+  buildRepeatedToolCallError,
   ClickReadLoopGuard,
   classifyClickFailure,
-  hasRecentDuplicateToolCall,
+  shouldSuppressDuplicateToolCall,
 } from "./tool-guardrails";
 import { isRichToolResult, type TextBlock } from "./tool-result";
 import {
@@ -998,21 +999,16 @@ export class CodexProvider implements AIProvider {
             continue;
           }
           if (
-            ![
-              "read_page",
-              "current_tab",
-              "inspect_element",
-              "screenshot",
-              "go_back",
-              "go_forward",
-              "click",
-            ].includes(prepared.prepared.name) &&
-            hasRecentDuplicateToolCall(recentToolSignatures, toolSignature)
+            shouldSuppressDuplicateToolCall(
+              recentToolSignatures,
+              prepared.prepared.name,
+              toolSignature,
+            )
           ) {
             onChunk(`\n<<tool:${prepared.prepared.name}:↻ duplicate suppressed>>\n`);
             const output = createCodexToolOutput(
               prepared.prepared.callId,
-              `Error: Repeated the same tool call (${prepared.prepared.name}) with the same arguments twice in a row. Do not repeat it. Continue with the next logical step for the original task.`,
+              buildRepeatedToolCallError(prepared.prepared.name),
             );
             currentInput.push(output);
             latestToolResultPreview = previewToolResult(output.output);

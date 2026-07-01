@@ -11,6 +11,7 @@
   "project": [
     ".husky/*",
     "bin/**/*.js",
+    ".husky/*",
     "scripts/**/*.{js,mjs}",
     "src/**/*.{ts,tsx}",
     "tests/**/*.ts"

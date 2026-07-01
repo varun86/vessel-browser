@@ -16,14 +16,19 @@ const logger = createLogger("Sessions");
 import { waitForLoad } from "../utils/webcontents-utils";
 
 const SESSION_VERSION = 1;
-const SESSION_ENVELOPE_FORMAT = "vessel:named-session:v2";
+const ENCRYPTED_SESSION_FORMAT = "vessel:named-session:v2";
 const SESSION_KEY_FILENAME = "vessel-named-sessions.key";
 
-const { encrypt, decrypt } = createEncryptDecrypt(SESSION_KEY_FILENAME);
+const sessionCrypto = createEncryptDecrypt(SESSION_KEY_FILENAME);
 
-interface NamedSessionEnvelope {
-  format: typeof SESSION_ENVELOPE_FORMAT;
+interface EncryptedSessionFile {
+  format: typeof ENCRYPTED_SESSION_FORMAT;
   payload: string;
+}
+
+interface DecodedSessionFile {
+  data: NamedSessionData | null;
+  encrypted: boolean;
 }
 
 function getSessionsDir(): string {
@@ -60,47 +65,66 @@ async function getSessionPath(name: string): Promise<string> {
   return path.join(dir, sessionFileName(name));
 }
 
-async function writeSessionFile(filePath: string, data: NamedSessionData): Promise<void> {
-  const payload = JSON.stringify({ version: SESSION_VERSION, ...data }, null, 2);
-  const envelope: NamedSessionEnvelope = {
-    format: SESSION_ENVELOPE_FORMAT,
-    payload: encrypt(payload).toString("base64"),
+function isEncryptedSessionFile(value: unknown): value is EncryptedSessionFile {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (value as { format?: unknown }).format === ENCRYPTED_SESSION_FORMAT &&
+    typeof (value as { payload?: unknown }).payload === "string"
+  );
+}
+
+function encodeSessionFile(data: NamedSessionData): string {
+  const plaintext = JSON.stringify({ version: SESSION_VERSION, ...data });
+  const encrypted = sessionCrypto.encrypt(plaintext);
+  return JSON.stringify(
+    {
+      format: ENCRYPTED_SESSION_FORMAT,
+      payload: encrypted.toString("base64"),
+    },
+    null,
+    2,
+  );
+}
+
+function decodeSessionFile(raw: string): DecodedSessionFile {
+  const parsed = JSON.parse(raw) as unknown;
+  if (isEncryptedSessionFile(parsed)) {
+    const decrypted = sessionCrypto.decrypt(Buffer.from(parsed.payload, "base64"));
+    return {
+      encrypted: true,
+      data: parseSessionData(JSON.parse(decrypted) as Partial<NamedSessionData> & {
+        version?: number;
+      }),
+    };
+  }
+
+  return {
+    encrypted: false,
+    data: parseSessionData(parsed as Partial<NamedSessionData> & {
+      version?: number;
+    }),
   };
-  await writeFileAtomic(filePath, JSON.stringify(envelope, null, 2), { mode: 0o600 });
+}
+
+async function writeSessionFile(filePath: string, data: NamedSessionData): Promise<void> {
+  const payload = encodeSessionFile(data);
+  await writeFileAtomic(filePath, payload, { mode: 0o600 });
 }
 
 async function readSessionFile(filePath: string): Promise<NamedSessionData | null> {
   const raw = await readIfExists(filePath, "utf-8");
   if (raw == null) return null;
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (isSessionEnvelope(parsed)) {
-      const decrypted = decrypt(Buffer.from(parsed.payload, "base64"));
-      return parseSessionData(JSON.parse(decrypted) as Partial<NamedSessionData> & {
-        version?: number;
-      });
+    const decoded = decodeSessionFile(raw);
+    if (decoded.data && !decoded.encrypted) {
+      await writeSessionFile(filePath, decoded.data);
     }
-
-    const sessionData = parseSessionData(parsed as Partial<NamedSessionData> & {
-      version?: number;
-    });
-    if (sessionData) {
-      await writeSessionFile(filePath, sessionData);
-    }
-    return sessionData;
+    return decoded.data;
   } catch (err) {
     logger.warn(`Failed to read session file ${filePath}:`, err);
     return null;
   }
-}
-
-function isSessionEnvelope(value: unknown): value is NamedSessionEnvelope {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    (value as { format?: unknown }).format === SESSION_ENVELOPE_FORMAT &&
-    typeof (value as { payload?: unknown }).payload === "string"
-  );
 }
 
 function parseSessionData(parsed: Partial<NamedSessionData> & { version?: number }): NamedSessionData | null {

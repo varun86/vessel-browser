@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildRepeatedToolCallError,
   buildClickReadLoopIntervention,
   classifyClickFailure,
   ClickReadLoopGuard,
   isHiddenClickFailure,
   isRedundantNavigateTarget,
   looksLikeCurrentSiteNameQuery,
+  REPEATED_TOOL_CALL_NUDGE,
   shouldBlockOffGoalDomainNavigation,
+  shouldSuppressDuplicateToolCall,
 } from "../src/main/ai/tool-guardrails";
 
 test("detects redundant navigation to the same normalized URL", () => {
@@ -117,6 +120,28 @@ test("isHiddenClickFailure only detects hidden click errors", () => {
     false,
   );
   assert.equal(isHiddenClickFailure(""), false);
+});
+
+test("duplicate tool-call suppression keeps retryable tools executable", () => {
+  const signature = "navigate:{\"url\":\"https://example.com\"}";
+
+  assert.equal(
+    shouldSuppressDuplicateToolCall([signature], "navigate", signature),
+    true,
+  );
+  assert.equal(
+    shouldSuppressDuplicateToolCall([signature], "read_page", signature),
+    false,
+  );
+  assert.equal(
+    shouldSuppressDuplicateToolCall([signature], "click", signature),
+    false,
+  );
+  assert.match(
+    buildRepeatedToolCallError("navigate"),
+    /Repeated the same tool call \(navigate\)/,
+  );
+  assert.match(REPEATED_TOOL_CALL_NUDGE, /stuck repeating/i);
 });
 
 test("clickReadLoop intervention escalates from nudge to suppress", () => {

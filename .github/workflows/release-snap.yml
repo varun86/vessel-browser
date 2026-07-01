@@ -69,7 +69,9 @@ jobs:
 
   snap:
     needs: version
-    runs-on: ubuntu-latest
+    # Keep the destructive-mode build host aligned with snap/snapcraft.yaml's
+    # core22 base so staged libraries do not require a newer glibc than core22.
+    runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -110,7 +112,10 @@ jobs:
         run: corepack npm run build && bash scripts/ci-electron-builder.sh --config electron-builder.config.cjs --linux dir --publish never
 
       - name: Install Snapcraft
-        run: sudo snap install snapcraft --classic
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binutils file squashfs-tools
+          sudo snap install snapcraft --classic
 
       - name: Build snap
         env:
@@ -124,6 +129,9 @@ jobs:
             exit 1
           fi
           echo "SNAP_PATH=$snap_path" >> "$GITHUB_ENV"
+
+      - name: Validate snap runtime ABI
+        run: bash scripts/validate-snap-glibc.sh "$SNAP_PATH" core22
 
       - name: Upload to Snap Store
         env:

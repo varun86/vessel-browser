@@ -133,6 +133,38 @@ export function hasRecentDuplicateToolCall(
   return recentToolSignatures.includes(signature);
 }
 
+const DUPLICATE_TOOL_CALL_RETRYABLE_TOOLS = new Set([
+  "read_page",
+  "current_tab",
+  "inspect_element",
+  "screenshot",
+  "go_back",
+  "go_forward",
+  "click",
+]);
+
+export const REPEATED_TOOL_CALL_NUDGE =
+  `[System] You are stuck repeating the same action. Stop repeating navigate/search. ` +
+  `Use a different supported tool that advances the task, such as click, read_page, or scroll.`;
+
+export function shouldSuppressDuplicateToolCall(
+  recentToolSignatures: string[],
+  toolName: string,
+  signature: string,
+): boolean {
+  return (
+    !DUPLICATE_TOOL_CALL_RETRYABLE_TOOLS.has(toolName) &&
+    hasRecentDuplicateToolCall(recentToolSignatures, signature)
+  );
+}
+
+export function buildRepeatedToolCallError(toolName: string): string {
+  return (
+    `Error: Repeated the same tool call (${toolName}) with the same arguments twice in a row. ` +
+    `Do not repeat it. Continue with the next logical step for the original task.`
+  );
+}
+
 export function isClickReadLoop(names: string[]): boolean {
   if (names.length < 6) return false;
   const tail = names.slice(-6);

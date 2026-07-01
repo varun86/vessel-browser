@@ -11,8 +11,10 @@ import {
 } from './tool-profile';
 import type { ProviderId } from '../../shared/types';
 import {
+  buildRepeatedToolCallError,
   ClickReadLoopGuard,
-  hasRecentDuplicateToolCall,
+  REPEATED_TOOL_CALL_NUDGE,
+  shouldSuppressDuplicateToolCall,
 } from './tool-guardrails';
 import { LLAMA_CPP_MIN_CTX_TOKENS, LLAMA_CPP_RECOMMENDED_CTX_TOKENS } from './content-limits';
 import { createLogger } from '../../shared/logger';
@@ -973,21 +975,11 @@ export class OpenAICompatProvider implements AIProvider {
             compactCorrectionCount += 1;
             continue;
           }
-          // These tools must never be suppressed as duplicates:
-          // - Read-only lookups: page state may have changed since last call
-          // - go_back/go_forward: each call pops the history stack
-          // - click: needs to be retryable (clicks often don't work the first
-          //   time due to obstructions, overlays, timing). Cart dedup and
-          //   click streak warnings handle the pathological cases separately.
-          const neverSuppressDuplicate = [
-            'read_page', 'current_tab', 'inspect_element', 'screenshot',
-            'go_back', 'go_forward', 'click',
-          ].includes(tc.name);
           if (
             this.agentToolProfile === 'compact' &&
-            !neverSuppressDuplicate &&
-            hasRecentDuplicateToolCall(
+            shouldSuppressDuplicateToolCall(
               recentCompactToolSignatures,
+              tc.name,
               toolSignature,
             )
           ) {
@@ -995,15 +987,13 @@ export class OpenAICompatProvider implements AIProvider {
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
-              content:
-                `Error: Repeated the same tool call (${tc.name}) with the same arguments twice in a row. ` +
-                `Do not repeat it. Continue with the next logical step for the original task.`,
+              content: buildRepeatedToolCallError(tc.name),
             });
             compactCorrectionCount += 1;
             if (compactCorrectionCount >= 2) {
               messages.push({
                 role: 'user',
-                content: `[System] You are stuck repeating the same action. Stop repeating navigate/search. Use a different supported tool that advances the task, such as click, read_page, or scroll.`,
+                content: REPEATED_TOOL_CALL_NUDGE,
               });
             }
             continue;
