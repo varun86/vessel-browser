@@ -4,6 +4,15 @@ import path from "path";
 import { createLogger } from "../../shared/logger";
 
 const logger = createLogger("JsonPersistence");
+const SECURE_STORAGE_UNAVAILABLE_MESSAGE =
+  "Secure persistence requires OS-backed secret storage.";
+
+class SecureStorageUnavailableError extends Error {
+  constructor() {
+    super(SECURE_STORAGE_UNAVAILABLE_MESSAGE);
+    this.name = "SecureStorageUnavailableError";
+  }
+}
 
 interface LoadJsonFileOptions<T> {
   filePath: string;
@@ -30,15 +39,31 @@ function canUseSafeStorage(): boolean {
   }
 }
 
+function assertSecureStorageAvailable(): void {
+  if (
+    !canUseSafeStorage() ||
+    !safeStorage.encryptString ||
+    !safeStorage.decryptString
+  ) {
+    throw new SecureStorageUnavailableError();
+  }
+}
+
+function isSecureStorageUnavailableError(err: unknown): boolean {
+  return err instanceof SecureStorageUnavailableError;
+}
+
 function decodeStoredData(data: Buffer, secure: boolean): string {
-  if (secure && canUseSafeStorage() && safeStorage.decryptString) {
+  if (secure) {
+    assertSecureStorageAvailable();
     return safeStorage.decryptString(data);
   }
   return data.toString("utf-8");
 }
 
 function encodeStoredData(payload: string, secure: boolean): Buffer | string {
-  if (secure && canUseSafeStorage() && safeStorage.encryptString) {
+  if (secure) {
+    assertSecureStorageAvailable();
     return safeStorage.encryptString(payload);
   }
   return payload;
@@ -59,6 +84,8 @@ export function loadJsonFile<T>({
       err instanceof Error && "code" in err && err.code === "ENOENT";
     if (isMissingFile) {
       logger.info(`Persistence file not found; using fallback defaults: ${filePath}`);
+    } else if (isSecureStorageUnavailableError(err)) {
+      throw err;
     } else {
       logger.warn(`Failed to load ${filePath}, using fallback:`, err);
     }
@@ -120,7 +147,11 @@ export function createDebouncedJsonPersistence<T>({
     }
     saveTimer = setTimeout(() => {
       saveTimer = null;
-      if (saveDirty) void persistNow();
+      if (saveDirty) {
+        void persistNow().catch((err) => {
+          logger.error(`Failed to save ${logLabel}:`, err);
+        });
+      }
     }, debounceMs);
   };
 

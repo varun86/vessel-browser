@@ -26,6 +26,11 @@ interface EncryptedSessionFile {
   payload: string;
 }
 
+interface DecodedSessionFile {
+  data: NamedSessionData | null;
+  encrypted: boolean;
+}
+
 function getSessionsDir(): string {
   return path.join(app.getPath("userData"), "named-sessions");
 }
@@ -82,17 +87,24 @@ function encodeSessionFile(data: NamedSessionData): string {
   );
 }
 
-function decodeSessionFile(raw: string): NamedSessionData | null {
+function decodeSessionFile(raw: string): DecodedSessionFile {
   const parsed = JSON.parse(raw) as unknown;
   if (isEncryptedSessionFile(parsed)) {
     const decrypted = sessionCrypto.decrypt(Buffer.from(parsed.payload, "base64"));
-    return parseSessionData(JSON.parse(decrypted) as Partial<NamedSessionData> & {
-      version?: number;
-    });
+    return {
+      encrypted: true,
+      data: parseSessionData(JSON.parse(decrypted) as Partial<NamedSessionData> & {
+        version?: number;
+      }),
+    };
   }
-  return parseSessionData(parsed as Partial<NamedSessionData> & {
-    version?: number;
-  });
+
+  return {
+    encrypted: false,
+    data: parseSessionData(parsed as Partial<NamedSessionData> & {
+      version?: number;
+    }),
+  };
 }
 
 async function writeSessionFile(filePath: string, data: NamedSessionData): Promise<void> {
@@ -104,7 +116,11 @@ async function readSessionFile(filePath: string): Promise<NamedSessionData | nul
   const raw = await readIfExists(filePath, "utf-8");
   if (raw == null) return null;
   try {
-    return decodeSessionFile(raw);
+    const decoded = decodeSessionFile(raw);
+    if (decoded.data && !decoded.encrypted) {
+      await writeSessionFile(filePath, decoded.data);
+    }
+    return decoded.data;
   } catch (err) {
     logger.warn(`Failed to read session file ${filePath}:`, err);
     return null;
