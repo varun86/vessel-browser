@@ -7,24 +7,27 @@
   </a>
   <a href="https://www.producthunt.com/products/quanta-intellect?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-vessel-browser-from-quanta-intellect" target="_blank" rel="noopener noreferrer"><img alt="Vessel Browser from Quanta Intellect - The browser where agents drive and humans supervise | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1107491&amp;theme=dark&amp;t=1774779141692"></a>
 
-# Vessel: Your Agent's Browser
+# Vessel: Your AI-Powered Browser
 </div>
 
-Open source chromium-based browser for persistent web agents. Linux is the most mature install target today, and macOS release packaging is available from source.
+Vessel is a simple, clean web browser with an AI assistant built in. Browse the web normally, then ask Vessel to help research, navigate pages, summarize what you are reading, fill forms, or keep track of longer tasks.
 
-Vessel gives external agent harnesses a real browser with durable state, MCP control, and a human-visible supervisory UI. It is built for long-running workflows where the agent drives and the human audits, intervenes, and redirects when needed.
+Unlike invisible browser automation, Vessel shows you what the AI is doing in a real browser window. You can follow along, approve important actions, pause or redirect the work, and take over whenever you want.
 
-- **Built for agent harnesses** such as Hermes Agent, OpenClaw, and other MCP clients
-- **Keeps browser state alive** with named sessions, pinned tabs, editable/exportable bookmarks, annotated checkpoints, action undo, and structured page visibility
-- **Keeps humans in the loop** with approvals, runtime controls, and a visible browser instead of a headless black box
+- **A familiar browser, with AI help nearby** — tabs, bookmarks, reader mode, downloads, and a sidebar assistant for web tasks
+- **Great for longer browsing sessions** — save named sessions, checkpoints, notes, bookmarks, and page changes so you can pick up where you left off
+- **You stay in control** — review what the AI is doing, approve sensitive actions, undo recent changes, and switch back to manual browsing at any time
+- **Open source and extensible** — built on Chromium, with advanced automation support for MCP clients and agent tools when you need it
 
-*Vessel is in active development and currently makes no security assurances. Use and deploy it with care.*
+Linux is the most mature install target today. macOS release packaging is available from source.
+
+*Vessel is in active development. Treat it as early software, especially for sensitive browsing or account access.*
 
 https://github.com/user-attachments/assets/0a72b48a-873a-4eb0-b8f2-23e34d8472c4
 
 ## Quick Start
 
-Want the full agent toolkit from day one? [Start a 7-Day Free Trial of Vessel Premium — $5.99/mo](https://vesselpremium.quantaintellect.com/checkout).
+Want the complete AI toolkit from day one? [Start a 7-Day Free Trial of Vessel Premium — $5.99/mo](https://vesselpremium.quantaintellect.com/checkout).
 
 ### Fastest Install Today
 
@@ -33,7 +36,7 @@ Linux AppImage from GitHub Releases:
 1. Download the latest `Vessel-<version>-x64.AppImage`
 2. Mark it executable: `chmod +x Vessel-*.AppImage`
 3. Launch it: `./Vessel-*.AppImage`
-4. Open Settings (`Ctrl+,`) and confirm the MCP endpoint shown there
+4. Open Settings (`Ctrl+,`) to choose your AI provider and review advanced connection options
 
 ### Install via npm
 
@@ -68,7 +71,7 @@ If you want extra local AI tracing in development, create an optional `src/main/
 
 ### Why Vessel?
 
-Most browser automation stacks are either headless, stateless, or designed around a human as the primary operator. Vessel is built around the opposite model: the browser is the agent's operating surface, and the human stays in the loop through a visible interface with clear supervisory controls.
+Most AI tools can answer questions about the web. Vessel is for actually working on the web: reading pages, following links, comparing information, filling forms, tracking changes, and keeping longer browsing sessions organized.
 
 <img width="1280" height="800" alt="Vessel Browser supervisor sidebar showing agent workflow controls" src="https://github.com/user-attachments/assets/8e208ee1-cb89-4318-87a2-9561a7d9aecf" />
 <img width="1280" height="800" alt="Vessel Browser command bar and agent-driven page interaction" src="https://github.com/user-attachments/assets/da7b28ea-6c5f-4aa7-909e-0a255c80d508" />
@@ -76,14 +79,14 @@ Most browser automation stacks are either headless, stateless, or designed aroun
 
 <img width="1280" height="800" alt="Vessel Browser integrated chat assistant with browser tools" src="https://github.com/user-attachments/assets/b1c08d6c-bcdf-4c9a-8429-a71a23a61903" />
 
-Vessel is built for persistent web agents that need a real browser, durable state, and a human-visible interface. The agent is the primary operator. The human follows along in the live browser UI, audits what the agent is doing, and steers when needed.
+Vessel keeps that work visible. The AI uses a real browser, so you can see the pages it opens, the choices it makes, and the places where it needs your approval. You are never stuck watching a hidden automation run or guessing what happened after the fact.
 
-Today, Vessel provides the browser shell, page visibility, and supervisory surfaces needed to support that model. The long-term goal is not "a browser with AI features," but a browser runtime for autonomous agents with a clear supervisory experience for humans.
+For power users and developers, the same foundation also supports external agents, MCP clients, persistent sessions, checkpoints, and browser automation workflows.
 
 ## Features
 
-- **Agent-first browser model** — Vessel is designed around an agent driving the browser while a human watches, intervenes, and redirects
-- **Human-visible browser UI** — pages render like a normal browser so agent activity stays legible instead of disappearing into a headless run
+- **AI-assisted browsing** — ask Vessel to help with research, page reading, navigation, form work, and multi-step web tasks
+- **Human-visible browser UI** — pages render like a normal browser so AI activity stays legible instead of disappearing into a hidden run
 - **Command Bar** (`Ctrl+L`) — a secondary operator surface for harness-driven workflows and future runtime commands
 - **Supervisor Sidebar** (`Ctrl+Shift+L`) — live supervision across eight tabs: Supervisor, Bookmarks, Checkpoints, Chat, Skills, History, Changes, and Research
 - **Chat Assistant** — built-in conversational AI in the sidebar Chat tab; supports Anthropic, OpenAI, Ollama, llama.cpp, Mistral, xAI, Google Gemini, OpenRouter, and any OpenAI-compatible endpoint; reads the current page automatically; has full access to the same browser tools as external agents; multi-turn session history; configure provider, model, and API key in Settings
