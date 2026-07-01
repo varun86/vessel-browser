@@ -5,10 +5,9 @@ import type { AgentRuntime } from "../../agent/runtime";
 import type { TabManager } from "../../tabs/tab-manager";
 import { asTextResponse, withAction } from "../mcp-helpers";
 
-const TAB_GROUP_COLOR_SET = new Set<string>(TAB_GROUP_COLORS);
-const TabGroupColorSchema = z.custom<TabGroupColor>(
-  (color) => typeof color === "string" && TAB_GROUP_COLOR_SET.has(color),
-  { message: "Invalid tab group color" },
+const TabGroupColorSchema = z.enum(
+  TAB_GROUP_COLORS as [TabGroupColor, ...TabGroupColor[]],
+  { error: "Invalid tab group color" },
 );
 
 export function registerGroupTools(

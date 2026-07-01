@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 
 import { registerGroupTools } from "../src/main/mcp/tools/groups";
 import type { AgentRuntime } from "../src/main/agent/runtime";
@@ -112,6 +112,24 @@ test("MCP group color schemas use the shared tab group palette", () => {
       () => colorSchema.parse("chartreuse"),
       /Invalid tab group color/,
     );
+  }
+});
+
+test("MCP group color schemas can be represented in JSON Schema", () => {
+  const { tools } = createHarness();
+
+  for (const toolName of ["create_group", "set_group_color"]) {
+    const inputSchema = getTool(tools, toolName).config.inputSchema;
+    assert.ok(inputSchema);
+
+    const jsonSchema = z.toJSONSchema(z.object(inputSchema));
+    const colorSchema = jsonSchema.properties?.color;
+
+    assert.deepEqual(colorSchema, {
+      type: "string",
+      enum: TAB_GROUP_COLORS,
+      description: toolName === "create_group" ? "Optional group color" : "New color",
+    });
   }
 });
 
