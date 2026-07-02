@@ -15,6 +15,7 @@
  *   OPENROUTER_API_KEY   — OpenRouter key used by hosted Vessel AI inference
  *   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON — Play Developer API service account JSON
  *   ANDROID_PACKAGE_NAME — optional package-name allowlist for Play purchase verification
+ *   MOBILE_BACKEND_ORIGIN — optional Node backend origin for Android routes/top-ups
  *   STRIPE_STARTER_PRICE_ID / STRIPE_PLUS_PRICE_ID / STRIPE_PRO_PRICE_ID — optional web plan mapping
  *
  * Google Play subscription product IDs:
@@ -33,6 +34,74 @@ const FEEDBACK_SPAM_GUARD_WINDOW_SECONDS = 60 * 60;
 const FEEDBACK_SPAM_GUARD_MAX = 5;
 const VESSEL_AI_MODEL = "minimax/minimax-m3";
 const OPENROUTER_API = "https://openrouter.ai/api/v1";
+const MOBILE_BACKEND_PROXY_ROUTES = new Set([
+  "/health",
+  "/play/verify",
+  "/play/topup/verify",
+]);
+
+function mobileBackendOrigin(env) {
+  return String(env.MOBILE_BACKEND_ORIGIN || "").trim().replace(/\/+$/, "");
+}
+
+function hasMobileBackendOrigin(env) {
+  return Boolean(mobileBackendOrigin(env));
+}
+
+function mobileBackendNotConfiguredResponse(request, env) {
+  return corsResponse(
+    request,
+    env,
+    {
+      error:
+        "Vessel mobile backend is not configured. Set MOBILE_BACKEND_ORIGIN to the Node backend origin.",
+    },
+    503,
+  );
+}
+
+async function proxyToMobileBackend(request, env) {
+  const origin = mobileBackendOrigin(env);
+  if (!origin) {
+    return mobileBackendNotConfiguredResponse(request, env);
+  }
+
+  const incomingUrl = new URL(request.url);
+  const targetUrl = new URL(origin);
+  targetUrl.pathname = incomingUrl.pathname;
+  targetUrl.search = incomingUrl.search;
+
+  const headers = new Headers(request.headers);
+  headers.set("x-vessel-edge", "cloudflare-premium-worker");
+  headers.set("x-forwarded-host", incomingUrl.host);
+  headers.delete("host");
+
+  return fetch(targetUrl.toString(), {
+    method: request.method,
+    headers,
+    body: request.body,
+    redirect: "manual",
+  });
+}
+
+async function hasDesktopPremiumEntitlementToken(request, env) {
+  try {
+    const body = await request.clone().json();
+    const identifier = String(body.identifier || "").trim();
+    const token = await verifySignedToken(env, identifier, "premium-access");
+    return Boolean(token?.customerId);
+  } catch {
+    return false;
+  }
+}
+
+async function hasDesktopPremiumBearerToken(request, env) {
+  const auth = request.headers.get("authorization") || "";
+  const tokenValue = auth.replace(/^Bearer\s+/i, "").trim();
+  const token = await verifySignedToken(env, tokenValue, "premium-access");
+  return Boolean(token?.customerId);
+}
+
 const USAGE_LEDGER_TTL_SECONDS = 93 * 24 * 60 * 60;
 const PLAN_CONFIG = {
   free: {
@@ -1532,14 +1601,26 @@ export default {
       if (path === "/verify" && request.method === "POST") {
         return handleVerify(request, env);
       }
-      if (path === "/entitlement" && request.method === "POST") {
-        return handleEntitlement(request, env);
+      if (MOBILE_BACKEND_PROXY_ROUTES.has(path)) {
+        if (hasMobileBackendOrigin(env)) {
+          return proxyToMobileBackend(request, env);
+        }
+        if (path === "/play/verify" && request.method === "POST") {
+          return handlePlayVerify(request, env);
+        }
+        return mobileBackendNotConfiguredResponse(request, env);
       }
-      if (path === "/play/verify" && request.method === "POST") {
-        return handlePlayVerify(request, env);
+      if (path === "/entitlement" && request.method === "POST") {
+        if (await hasDesktopPremiumEntitlementToken(request, env) || !hasMobileBackendOrigin(env)) {
+          return handleEntitlement(request, env);
+        }
+        return proxyToMobileBackend(request, env);
       }
       if (path === "/ai/chat/completions" && request.method === "POST") {
-        return handleAiChatCompletions(request, env);
+        if (await hasDesktopPremiumBearerToken(request, env) || !hasMobileBackendOrigin(env)) {
+          return handleAiChatCompletions(request, env);
+        }
+        return proxyToMobileBackend(request, env);
       }
       if (path === "/webhook" && request.method === "POST") {
         return handleWebhook(request, env);
