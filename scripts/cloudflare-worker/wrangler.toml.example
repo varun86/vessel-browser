@@ -1,0 +1,22 @@
+name = "vesselpremium"
+main = "vessel-premium-api.js"
+compatibility_date = "2026-03-25"
+preview_urls = false
+
+# Keep the catch-all route: this Worker is the compatibility edge for desktop
+# Stripe Premium routes and proxies mobile-only API routes to the Node backend
+# when MOBILE_BACKEND_ORIGIN is configured as a Worker secret/variable.
+routes = [
+  { pattern = "vesselpremium.quantaintellect.com/*", zone_name = "quantaintellect.com" }
+]
+
+# Fill this with the production KV namespace ID before deploy.
+[[kv_namespaces]]
+id = "<ACTIVATION_KV_NAMESPACE_ID>"
+binding = "ACTIVATION_KV"
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true

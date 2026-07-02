@@ -128,6 +128,160 @@ async function createPremiumToken(customerId = "cus_test"): Promise<string> {
   );
 }
 
+
+test("premium worker proxies mobile-only routes to the configured Node backend", async () => {
+  let proxiedUrl = "";
+  let proxiedEdgeHeader = "";
+  let proxiedHostHeader = "";
+
+  await withMockFetch(
+    (url, init) => {
+      proxiedUrl = url;
+      proxiedEdgeHeader = String(new Headers(init?.headers).get("x-vessel-edge") || "");
+      proxiedHostHeader = String(new Headers(init?.headers).get("x-forwarded-host") || "");
+      return { ok: true };
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(`${WORKER_URL}/health?probe=1`),
+        { ...env, MOBILE_BACKEND_ORIGIN: "https://mobile-origin.example" },
+      );
+      const data = await response.json() as { ok?: boolean };
+
+      assert.equal(response.status, 200);
+      assert.equal(data.ok, true);
+      assert.equal(proxiedUrl, "https://mobile-origin.example/health?probe=1");
+      assert.equal(proxiedEdgeHeader, "cloudflare-premium-worker");
+      assert.equal(proxiedHostHeader, "premium.example");
+    },
+  );
+});
+
+test("premium worker proxies mobile entitlement tokens while keeping desktop tokens local", async () => {
+  const mobileToken = "mobile.jwt.token";
+  let proxiedUrl = "";
+  let proxiedBody = "";
+
+  await withMockFetch(
+    async (url, init) => {
+      proxiedUrl = url;
+      proxiedBody = await new Response(init?.body as BodyInit).text();
+      return { status: "active", verificationToken: mobileToken };
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(`${WORKER_URL}/entitlement`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier: mobileToken }),
+        }),
+        { ...env, MOBILE_BACKEND_ORIGIN: "https://mobile-origin.example" },
+      );
+      const data = await response.json() as { status?: string; verificationToken?: string };
+
+      assert.equal(response.status, 200);
+      assert.equal(data.status, "active");
+      assert.equal(data.verificationToken, mobileToken);
+      assert.equal(proxiedUrl, "https://mobile-origin.example/entitlement");
+      assert.equal(proxiedBody, JSON.stringify({ identifier: mobileToken }));
+    },
+  );
+
+  const desktopToken = await createPremiumToken("cus_desktop_proxy_guard");
+  let didProxyDesktopToken = false;
+  await withMockFetch(
+    (url) => {
+      if (url === `${STRIPE_API}/customers/cus_desktop_proxy_guard`) {
+        return { id: "cus_desktop_proxy_guard", email: "premium@example.com" };
+      }
+      if (url === `${STRIPE_API}/subscriptions?customer=cus_desktop_proxy_guard&status=all&limit=10`) {
+        return {
+          data: [
+            {
+              id: "sub_active",
+              status: "active",
+              current_period_end: nowSeconds() + 30 * 24 * 60 * 60,
+            },
+          ],
+        };
+      }
+      if (url.startsWith("https://mobile-origin.example")) {
+        didProxyDesktopToken = true;
+        return { status: "proxied" };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(`${WORKER_URL}/entitlement`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier: desktopToken }),
+        }),
+        { ...env, MOBILE_BACKEND_ORIGIN: "https://mobile-origin.example" },
+      );
+      const data = await response.json() as { status?: string; customerId?: string };
+
+      assert.equal(response.status, 200);
+      assert.equal(data.status, "active");
+      assert.equal(data.customerId, "cus_desktop_proxy_guard");
+      assert.equal(didProxyDesktopToken, false);
+    },
+  );
+});
+
+
+test("premium worker proxies mobile AI bearer tokens to the Node backend", async () => {
+  let proxiedUrl = "";
+  let proxiedAuthorization = "";
+  let proxiedBody = "";
+
+  await withMockFetch(
+    async (url, init) => {
+      proxiedUrl = url;
+      proxiedAuthorization = String(new Headers(init?.headers).get("authorization") || "");
+      proxiedBody = await new Response(init?.body as BodyInit).text();
+      return { id: "chatcmpl_mobile", choices: [] };
+    },
+    async () => {
+      const body = { model: "vessel/default", messages: [{ role: "user", content: "hello" }] };
+      const response = await worker.fetch(
+        new Request(`${WORKER_URL}/ai/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer mobile.jwt.token",
+          },
+          body: JSON.stringify(body),
+        }),
+        { ...env, MOBILE_BACKEND_ORIGIN: "https://mobile-origin.example" },
+      );
+      const data = await response.json() as { id?: string };
+
+      assert.equal(response.status, 200);
+      assert.equal(data.id, "chatcmpl_mobile");
+      assert.equal(proxiedUrl, "https://mobile-origin.example/ai/chat/completions");
+      assert.equal(proxiedAuthorization, "Bearer mobile.jwt.token");
+      assert.equal(proxiedBody, JSON.stringify(body));
+    },
+  );
+});
+
+test("premium worker returns a clear config error for mobile-only routes without an origin", async () => {
+  const response = await worker.fetch(
+    new Request(`${WORKER_URL}/play/topup/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier: "token", packageName: "pkg", productId: "sku", purchaseToken: "purchase" }),
+    }),
+    env,
+  );
+  const data = await response.json() as { error?: string };
+
+  assert.equal(response.status, 503);
+  assert.match(data.error || "", /MOBILE_BACKEND_ORIGIN/);
+});
+
 test("premium worker verifies checkout sessions using the exact session subscription", async () => {
   const kv = createMemoryKv();
   await withMockFetch(
