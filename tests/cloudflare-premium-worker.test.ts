@@ -803,3 +803,38 @@ test("premium worker verifies activation codes before the attempt limit", async 
     },
   );
 });
+
+test("premium worker finds mixed-case Stripe customer emails during activation", async () => {
+  const kv = createMemoryKv();
+  let sentCode = "";
+
+  await withMockFetch(
+    (url, init) => {
+      if (url === `${STRIPE_API}/customers?email=paul.h9%40proton.me&limit=1`) {
+        return { data: [] };
+      }
+      if (url === `${STRIPE_API}/customers/search?query=email%3A'paul.h9%40proton.me'&limit=1`) {
+        return { data: [{ id: "cus_mixed_case", email: "Paul.H9@proton.me" }] };
+      }
+      if (url === "https://api.resend.com/emails") {
+        const body = JSON.parse(String(init?.body || "{}")) as { text?: string; to?: string[] };
+        sentCode = body.text?.match(/\b\d{6}\b/)?.[0] || "";
+        assert.deepEqual(body.to, ["paul.h9@proton.me"]);
+        return { id: "email_test" };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    },
+    async () => {
+      const start = await postJsonWithEnv(
+        "/activate/start",
+        { email: "Paul.H9@proton.me" },
+        { ACTIVATION_KV: kv },
+      );
+      const data = await start.json() as { challengeToken?: string };
+
+      assert.equal(start.status, 200);
+      assert.match(sentCode, /^\d{6}$/);
+      assert.equal(typeof data.challengeToken, "string");
+    },
+  );
+});

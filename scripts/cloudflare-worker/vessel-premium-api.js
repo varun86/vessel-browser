@@ -201,7 +201,19 @@ function planFromPlayProduct(productId) {
 
 async function findCustomerByEmail(env, email) {
   const data = await stripeRequest(env, "GET", `/customers?email=${encodeURIComponent(email)}&limit=1`);
-  return data.data?.[0] || null;
+  if (data.data?.[0]) return data.data[0];
+
+  const searchQuery = `email:'${escapeStripeSearchString(email)}'`;
+  const searchData = await stripeRequest(
+    env,
+    "GET",
+    `/customers/search?query=${encodeURIComponent(searchQuery)}&limit=1`,
+  );
+  return searchData.data?.[0] || null;
+}
+
+function escapeStripeSearchString(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 async function getSubscription(env, customerId) {
